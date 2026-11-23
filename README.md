@@ -29,6 +29,7 @@ The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANG
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Object storage requirements](#object-storage-requirements)
+- [HEIC photos](#heic-photos)
 - [Architecture](#architecture)
 - [Development and tests](#development-and-tests)
 - [Current limitations](#current-limitations)
@@ -263,6 +264,21 @@ curl -X PUT https://photos.example.com/api/v1/storage/cors \
   -d '{}'
 ```
 
+## HEIC photos
+
+iPhone shoots HEIC, and only Safari can decode it. Every other browser loads a
+WebAssembly build of libheif on first use — a ~2 MB chunk that is fetched lazily,
+so a browser that can already decode HEIC never downloads it.
+
+Originals are never transcoded. The viewer shows the WebP preview for HEIC
+because Chromium cannot render the original, and the download button still hands
+back the untouched HEIC file.
+
+The Content-Security-Policy includes `'wasm-unsafe-eval'`, which allows
+WebAssembly to compile without permitting `eval()` of JavaScript.
+
+See [docs/07-heic.md](./docs/07-heic.md) for the design and the tests.
+
 ## Architecture
 
 ```text
@@ -297,7 +313,8 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 
 ## Current limitations
 
-- JPEG, PNG, WebP and GIF are fully supported in the browser; HEIC/HEIF and video have no preview or transcoding pipeline yet.
+- JPEG, PNG, WebP, GIF and HEIC are supported. HEIC is decoded in the browser: Safari decodes it natively, everything else loads a WebAssembly build of libheif on first use. Video has no preview pipeline.
+- The viewer shows the WebP preview for HEIC because browsers other than Safari cannot render the original. The original file is stored untouched and still downloads as HEIC.
 - Duplicate detection compares exact bytes within one album. The same picture re-encoded or exported from HEIC counts as a different file, and the same file added to two albums is stored twice.
 - Deleting moves photos to a trash that is emptied after `TRASH_RETENTION`. There is no per-photo history, so "who deleted this" is only as trustworthy as the name typed into that browser.
 - Packaging runs inside the API process with a single worker loop. At larger scale, split it into a separate worker with durable leases.

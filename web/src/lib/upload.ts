@@ -2,6 +2,7 @@ import { translate, currentLocale } from './i18n';
 import { api } from './api';
 import type { DuplicateCheck, UploadGrant } from './api';
 import { getDisplayName } from './identity';
+import { decodeImage, resolveMime, resizeToWebp, SUPPORTED_MIME } from './decode';
 
 const t = (key: string, vars?: Record<string, string | number>) => translate(currentLocale(), key, vars);
 
@@ -15,30 +16,16 @@ export async function checkDuplicates(albumID: string, hashes: string[]): Promis
   return api<DuplicateCheck>('/uploads/check', { method: 'POST', body: JSON.stringify({ album_id: albumID, hashes }) });
 }
 
-async function imageDimensions(file: File): Promise<{ width: number; height: number }> {
-  if (!file.type.startsWith('image/') || /heic|heif/i.test(file.type)) return { width: 0, height: 0 };
-  const url = URL.createObjectURL(file);
+async function derivatives(file: File): Promise<{ width: number; height: number; thumb: Blob; preview: Blob }> {
+  // One decode, two sizes. Decoding per size meant a HEIC file was decoded twice,
+  // which is the expensive part.
+  const decoded = await decodeImage(file);
   try {
-    const image = new Image(); image.src = url;
-    await image.decode();
-    return { width: image.naturalWidth, height: image.naturalHeight };
-  } catch { return { width: 0, height: 0 }; }
-  finally { URL.revokeObjectURL(url); }
-}
-
-async function derivative(file: File, width: number, height: number, max: number): Promise<Blob> {
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image(); image.src = url; await image.decode();
-    const scale = Math.min(1, max / Math.max(width, height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error(t('upload.previewUnsupported'));
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(t('upload.previewFailed'))), 'image/webp', .84));
-  } finally { URL.revokeObjectURL(url); }
+    const [thumb, preview] = await Promise.all([resizeToWebp(decoded, 480), resizeToWebp(decoded, 1600)]);
+    return { width: decoded.width, height: decoded.height, thumb, preview };
+  } finally {
+    decoded.release();
+  }
 }
 
 async function put(url: string, body: Blob): Promise<string> {
@@ -48,13 +35,12 @@ async function put(url: string, body: Blob): Promise<string> {
 }
 
 export async function uploadPhoto(file: File, albumID: string, options: UploadOptions = {}, onProgress?: UploadProgress): Promise<string> {
-  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error(t('upload.unsupportedType'));
+  const mime = resolveMime(file);
+  if (!SUPPORTED_MIME.includes(mime)) throw new Error(t('upload.unsupportedType'));
   if (file.size > 200 * 1024 * 1024) throw new Error(t('upload.tooLarge'));
-  const { width, height } = await imageDimensions(file);
-  if (!width || !height) throw new Error(t('upload.readDimensions'));
-  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime: file.type, width, height, contributor: getDisplayName(), content_hash: options.contentHash || '', allow_duplicate: !!options.allowDuplicate }) });
+  const { width, height, thumb, preview } = await derivatives(file);
+  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime, width, height, contributor: getDisplayName(), content_hash: options.contentHash || '', allow_duplicate: !!options.allowDuplicate }) });
   await transfer(file, grant, onProgress);
-  const [thumb, preview] = await Promise.all([derivative(file, width, height, 480), derivative(file, width, height, 1600)]);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
   const result = await api<{ id: string }>(`/uploads/${grant.id}/complete`, { method: 'POST', body: JSON.stringify({ parts: completedParts(grant.id) }) });
   onProgress?.(1, 1, t('upload.done'));
@@ -62,12 +48,11 @@ export async function uploadPhoto(file: File, albumID: string, options: UploadOp
 }
 
 export async function uploadGuestPhoto(file: File, message: string, options: UploadOptions = {}, onProgress?: UploadProgress): Promise<string> {
-  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error(t('upload.pickPhoto'));
-  const { width, height } = await imageDimensions(file);
-  if (!width || !height) throw new Error(t('upload.readDimensionsShort'));
-  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime: file.type, width, height, message, content_hash: options.contentHash || '' }) });
+  const mime = resolveMime(file);
+  if (!SUPPORTED_MIME.includes(mime)) throw new Error(t('upload.pickPhoto'));
+  const { width, height, thumb, preview } = await derivatives(file);
+  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime, width, height, message, content_hash: options.contentHash || '' }) });
   await transfer(file, grant, onProgress);
-  const [thumb, preview] = await Promise.all([derivative(file, width, height, 480), derivative(file, width, height, 1600)]);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
   const result = await api<{ id: string }>('/guest/collections/uploads/' + grant.id + '/complete', { method: 'POST', body: JSON.stringify({ parts: completedParts(grant.id) }) });
   return result.id;

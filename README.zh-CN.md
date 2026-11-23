@@ -27,6 +27,7 @@
 - [快速开始](#快速开始)
 - [配置](#配置)
 - [对象存储要求](#对象存储要求)
+- [HEIC 照片](#heic-照片)
 - [架构](#架构)
 - [开发与测试](#开发与测试)
 - [当前边界](#当前边界)
@@ -248,6 +249,19 @@ curl -X PUT https://photos.example.com/api/v1/storage/cors \
   -d '{}'
 ```
 
+## HEIC 照片
+
+iPhone 拍的是 HEIC，而只有 Safari 能解码。其他浏览器首次遇到时加载 libheif 的
+WebAssembly 版本——约 2 MB 的分块，懒加载，能原生解码的浏览器根本不会下载它。
+
+原图从不转码。查看器对 HEIC 显示 WebP 预览图（因为 Chromium 渲染不了原图），
+而下载按钮拿到的仍是未经改动的 HEIC 文件。
+
+CSP 里包含 `'wasm-unsafe-eval'`，它允许编译 WebAssembly，但不允许 `eval()`
+执行 JavaScript 源码。
+
+设计说明与测试见 [docs/07-heic.md](./docs/07-heic.md)。
+
 ## 架构
 
 ```text
@@ -281,7 +295,8 @@ docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
 
 ## 当前边界
 
-- 浏览器端完整支持 JPG、PNG、WebP、GIF；HEIC/HEIF 与视频暂无预览或转码链路。
+- 支持 JPG、PNG、WebP、GIF、HEIC。HEIC 在浏览器内解码：Safari 原生支持，其他浏览器首次遇到时加载 libheif 的 WebAssembly 版本。视频暂无预览链路。
+- HEIC 在查看器中显示的是 WebP 预览图，因为除 Safari 外的浏览器无法渲染原图。原文件仍然原样保存，下载得到的仍是 HEIC。
 - 去重只比对同一相册内的精确字节：重新编码或从 HEIC 导出的同一画面算作不同文件，同一文件传到两个相册会存两份。
 - 删除会移入回收站，超过 `TRASH_RETENTION` 后自动清空。没有逐张的操作历史，所以「谁删的」只相当于当初在浏览器里填的名字。
 - 打包任务运行在 API 进程内，单 worker 循环；大规模使用时可拆分为独立 worker 并加入持久租约。

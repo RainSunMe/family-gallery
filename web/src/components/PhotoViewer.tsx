@@ -330,7 +330,11 @@ function ViewerBackdrop({ photo, guestToken }: { photo: Photo; guestToken: strin
 }
 function ViewerImage({ photo, guestToken, active, scale, offset }: { photo: Photo; guestToken: string; active: boolean; scale: number; offset: Offset }) {
   const t = useT();
-  const original = useSignedURL(photo.id, 'original', guestToken);
+  // A HEIC original only renders in browsers that can decode it, so the viewer
+  // uses the WebP preview for those and keeps the original for the download
+  // button. Preferring the original would show a broken image in Chrome.
+  const heic = /hei[cf]/i.test(photo.mime);
+  const original = useSignedURL(photo.id, heic ? 'preview' : 'original', guestToken);
   const preview = useSignedURL(photo.id, 'preview', guestToken);
   const url = original.url || preview.url;
   return <div className="viewer-image-wrap" style={{ transform: `translate3d(${offset.x}px,${offset.y}px,0) scale(${scale})` }}>

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { AlertTriangle, ImagePlus, LoaderCircle, UploadCloud } from 'lucide-react';
 import { Dialog, Note } from './ui';
 import { checkDuplicates, uploadPhoto, uploadGuestPhoto } from '../lib/upload';
+import { UPLOAD_ACCEPT } from '../lib/decode';
 import { hashFiles } from '../lib/hash';
 import type { Album, ExistingPhoto } from '../lib/api';
 import { ApiError } from '../lib/api';
@@ -119,7 +120,7 @@ export function UploadDialog({ albums, initialAlbum, onClose, onComplete }: { al
         <span className="w-12 h-12 grid place-items-center rounded-[13px] bg-accent-soft text-accent mb-4"><ImagePlus className="w-6 h-6" /></span>
         <strong className="text-sm font-medium">{t('uploadDialog.dropTitle')}</strong>
         <span className="text-xs text-muted mt-2 leading-7 whitespace-pre-line">{t('uploadDialog.dropHint')}</span>
-        <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={event => pickFiles(Array.from(event.target.files || []))} disabled={busy} />
+		<input className="sr-only" type="file" accept={UPLOAD_ACCEPT} multiple onChange={event => pickFiles(Array.from(event.target.files || []))} disabled={busy} />
       </label>
 
       {files.length > 0 && <div className="mt-4 max-h-[180px] overflow-auto space-y-2">{files.map((file, index) => <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-canvas text-xs" key={`${file.name}-${index}`}><ImagePlus className="w-4 h-4 text-accent" /><span className="truncate flex-1">{file.name}</span><span className="text-muted text-[10px]">{Math.max(.1, file.size / 1024 / 1024).toFixed(1)} MB</span></div>)}</div>}

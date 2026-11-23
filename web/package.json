@@ -13,6 +13,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.12",
     "@tanstack/react-router": "^1.141.3",
+    "libheif-js": "1.23.5",
     "lucide-react": "^0.468.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",

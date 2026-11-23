@@ -152,7 +152,11 @@ func (a *API) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' http: https: data: blob:; media-src 'self' http: https: blob:; connect-src 'self' http: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		// 'wasm-unsafe-eval' is what allows the HEIC decoder to compile its
+		// WebAssembly module. It is deliberately narrow: it permits WebAssembly
+		// compilation but not eval() of JavaScript source, so it does not widen
+		// the XSS surface the way 'unsafe-eval' would.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' http: https: data: blob:; media-src 'self' http: https: blob:; connect-src 'self' http: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("Origin") != "" && r.Header.Get("Origin") != a.cfg.PublicURL {
 			writeError(w, http.StatusForbidden, "ORIGIN_REJECTED", T(r)("origin_rejected"))
 			return
