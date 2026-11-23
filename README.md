@@ -231,6 +231,20 @@ of those an album holds.
 
 See [docs/05-photo-dedup.md](./docs/05-photo-dedup.md) for the full design.
 
+#### Trash
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TRASH_RETENTION` | `720h` | How long deleted photos wait before permanent deletion. `0` keeps them until an admin empties the trash. |
+
+Deleting a photo moves it to the trash: it disappears from albums, counts, shares
+and old download archives immediately, but its bytes stay in the bucket until the
+retention window passes. A toast offers undo for eight seconds, and the trash page
+can restore anything still in it. Restoring a photo whose album was also deleted
+brings the album back too.
+
+See [docs/06-trash.md](./docs/06-trash.md) for the full design.
+
 ## Object storage requirements
 
 Any S3-compatible service works: **Garage, MinIO, SeaweedFS, Ceph RGW, AWS S3**, and others.
@@ -285,7 +299,7 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 
 - JPEG, PNG, WebP and GIF are fully supported in the browser; HEIC/HEIF and video have no preview or transcoding pipeline yet.
 - Duplicate detection compares exact bytes within one album. The same picture re-encoded or exported from HEIC counts as a different file, and the same file added to two albums is stored twice.
-- The delete and trash UI is not exposed yet.
+- Deleting moves photos to a trash that is emptied after `TRASH_RETENTION`. There is no per-photo history, so "who deleted this" is only as trustworthy as the name typed into that browser.
 - Packaging runs inside the API process with a single worker loop. At larger scale, split it into a separate worker with durable leases.
 - Both SQLite and the object store need their own backups, and restores should be rehearsed regularly.
 

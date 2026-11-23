@@ -1,4 +1,5 @@
 import { currentLocale, translate } from './i18n';
+import { getDisplayName } from './identity';
 
 export type Role = 'family' | 'admin';
 export type Album = {
@@ -25,6 +26,15 @@ export type DownloadJob = { id: string; status: 'queued' | 'running' | 'succeede
 export type UploadGrant = { id: string; key: string; url: string; thumb_url: string; preview_url: string; multipart_upload_id: string; part_size: number };
 export type ExistingPhoto = { id: string; name: string; contributor: string; taken_at: string; thumb_url: string };
 export type DuplicateCheck = { duplicates: Record<string, ExistingPhoto>; new: string[]; legacy_photos: number };
+export type TrashItem = {
+  id: string; album_id: string; album_name: string; album_deleted: boolean; name: string;
+  size: number; width: number; height: number; contributor: string;
+  deleted_by: string; deleted_at: string; thumb_url: string;
+};
+export type TrashPage = {
+  items: TrashItem[]; next_cursor: string; total_count: number; total_bytes: number;
+  retention_days: number; expires_at: string;
+};
 
 export class ApiError extends Error {
   // `details` carries the parsed error body so a caller can react to fields
@@ -69,6 +79,11 @@ export const guestPhotos = (token: string, albumID: string) => api<PhotoPage>(`/
 export const guestCollection = () => api<{ id: string; name: string; description: string; expires_at: string; batch_limit: number; allow_message: boolean; display_name: string }>('/guest/collections/current');
 export const guestSession = (token: string, displayName: string) => api<{ display_name: string }>(`/guest/collections/${token}/session`, { method: 'POST', body: JSON.stringify({ display_name: displayName }) });
 export const guestSubmissions = () => api<{ items: { id: string; name: string; url: string; status: string; created_at: string }[] }>('/guest/collections/submissions');
+export const listTrash = (cursor = '') => api<TrashPage>(`/trash${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+export const trashPhotos = (ids: string[]) => api<{ trashed: number; batch: string }>('/photos/trash', { method: 'POST', body: JSON.stringify({ ids, by: getDisplayName() }) });
+export const restorePhotos = (ids: string[]) => api<{ restored: number; albums_restored: number }>('/trash/restore', { method: 'POST', body: JSON.stringify({ ids }) });
+export const emptyTrash = () => api<{ purged: number; failed: number }>('/trash', { method: 'DELETE' });
+export const deleteAlbum = (id: string) => api<{ deleted: boolean; photos: number }>(`/albums/${id}`, { method: 'DELETE', body: JSON.stringify({ by: getDisplayName() }) });
 export const signPhoto = (id: string, variant = 'original', guestToken = '', download = false) => guestToken.startsWith('collection:')
   ? api<{ url: string }>(`/collections/${guestToken.slice(11)}/sign-read`, { method: 'POST', body: JSON.stringify({ item_id: id, variant }) })
   : api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/media/sign-read`, { method: 'POST', body: JSON.stringify({ photo_id: id, variant, download }) });

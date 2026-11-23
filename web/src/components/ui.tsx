@@ -88,9 +88,11 @@ export function Note({ children, warning = false }: { children: ReactNode; warni
   return <div className="note"><Info className="icon" /><span className={warning ? 'text-[#a2663d]' : ''}>{children}</span></div>;
 }
 
-export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
-  useEffect(() => { const timer = setTimeout(onClose, 4500); return () => clearTimeout(timer); }, [message, onClose]);
-  return <div className="toast glass" role="status"><CheckCircle2 className="icon" /><span>{message}</span></div>;
+export function Toast({ message, onClose, action }: { message: string; onClose: () => void; action?: { label: string; run: () => void } }) {
+  // A toast that offers undo lives longer: 4.5s is not enough time to read the
+  // message and decide to reverse it.
+  useEffect(() => { const timer = setTimeout(onClose, action ? 8000 : 4500); return () => clearTimeout(timer); }, [message, onClose, action]);
+  return <div className="toast glass" role="status"><CheckCircle2 className="icon" /><span>{message}</span>{action && <button className="toast-action" onClick={() => { action.run(); onClose(); }}>{action.label}</button>}</div>;
 }
 
 export function Empty({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {

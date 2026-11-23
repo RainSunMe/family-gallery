@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, CheckSquare2, ImageIcon, ImageOff } from 'lucide-react';
+import { Check, CheckSquare2, ImageIcon, ImageOff, Trash2 } from 'lucide-react';
 import type { Photo } from '../lib/api';
 import { formatDate } from '../lib/api';
 import { useT } from '../lib/i18n';
 
 export { PhotoViewer } from './PhotoViewer';
 
-export function PhotoGrid({ photos, urls, selecting, selected, onSelect, onStartSelection, onOpen, origins, onSetCover }: {
+export function PhotoGrid({ photos, urls, selecting, selected, onSelect, onStartSelection, onOpen, origins, onSetCover, onTrash }: {
   photos: Photo[]; urls: Record<string, string>; selecting: boolean; selected: Set<string>;
   onSelect: (id: string) => void; onStartSelection: (id: string) => void; onOpen: (index: number) => void;
   origins?: Record<string, string>; onSetCover?: (photo: Photo) => void | Promise<void>;
+  onTrash?: (photo: Photo) => void;
 }) {
   const t = useT();
   const [context, setContext] = useState<{ x: number; y: number; index: number } | null>(null);
@@ -29,7 +30,9 @@ export function PhotoGrid({ photos, urls, selecting, selected, onSelect, onStart
 
   const openContext = (x: number, y: number, index: number) => {
     window.clearTimeout(longPress.current.timer);
-    setContext({ x: Math.max(8, Math.min(x, window.innerWidth - 208)), y: Math.max(8, Math.min(y, window.innerHeight - (onSetCover ? 154 : 110))), index });
+    // Keep the menu on screen: each entry is ~44px, plus the panel padding.
+    const entries = 2 + (onSetCover ? 1 : 0) + (onTrash ? 1 : 0);
+    setContext({ x: Math.max(8, Math.min(x, window.innerWidth - 208)), y: Math.max(8, Math.min(y, window.innerHeight - (entries * 44 + 22))), index });
   };
   const groups = new Map<string, { photo: Photo; index: number }[]>();
   photos.forEach((photo, index) => { const date = formatDate(photo.taken_at); if (!groups.has(date)) groups.set(date, []); groups.get(date)!.push({ photo, index }); });
@@ -60,6 +63,7 @@ export function PhotoGrid({ photos, urls, selecting, selected, onSelect, onStart
     <button role="menuitem" autoFocus onClick={() => { onStartSelection(contextPhoto.id); setContext(null); }}><CheckSquare2 className="icon" />{t('grid.multiSelect')}</button>
     <button role="menuitem" onClick={() => { onOpen(context.index); setContext(null); }}><ImageIcon className="icon" />{t('grid.viewPhoto')}</button>
     {onSetCover && <button role="menuitem" onClick={() => { void onSetCover(contextPhoto); setContext(null); }}><ImageIcon className="icon" />{t('grid.setCover')}</button>}
+    {onTrash && <button role="menuitem" className="danger" onClick={() => { onTrash(contextPhoto); setContext(null); }}><Trash2 className="icon" />{t('grid.moveToTrash')}</button>}
   </div>}
   </div>;
 }

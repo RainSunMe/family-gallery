@@ -6,6 +6,7 @@ import { FamilyApp, queryClient, useFamilyActions } from './FamilyApp';
 import { AlbumsPage, PhotosPage } from './components/LibraryPages';
 import { CollectionsPage, SharesPage } from './components/SharingPages';
 import { CollectionDetail } from './components/CollectionDetail';
+import { TrashPage } from './components/TrashPage';
 import { GuestCollectionPage } from './components/GuestCollectionPage';
 import { Empty } from './components/ui';
 import { guestAlbum, guestPhotos, listAlbums } from './lib/api';
@@ -18,15 +19,16 @@ import './viewer.css';
 const familyRoute = createRoute({ getParentRoute: () => rootRoute, id: 'family', component: FamilyApp });
 
 function AlbumsRoute() { const actions = useFamilyActions(); return <AlbumsPage onNewAlbum={actions.onNewAlbum} />; }
-function PhotosRoute() { const actions = useFamilyActions(); return <PhotosPage onUpload={actions.onUpload} />; }
+function PhotosRoute() { const actions = useFamilyActions(); return <PhotosPage onUpload={actions.onUpload} canTrash onTrash={actions.onTrash} onToast={actions.onToast} />; }
 function AlbumRoute() {
   const { albumID } = albumDetailRoute.useParams();
   const actions = useFamilyActions();
-  return <PhotosPage albumID={albumID} onUpload={actions.onUpload} onShare={() => listAlbums().then(result => { const album = result.items.find(item => item.id === albumID); if (album) actions.onShare(album); })} canSetCover={actions.role === 'admin'} onToast={actions.onToast} />;
+  return <PhotosPage albumID={albumID} onUpload={actions.onUpload} onShare={() => listAlbums().then(result => { const album = result.items.find(item => item.id === albumID); if (album) actions.onShare(album); })} canSetCover={actions.role === 'admin'} canTrash onTrash={actions.onTrash} onDeleteAlbum={actions.role === 'admin' ? () => actions.onDeleteAlbum(albumID) : undefined} onToast={actions.onToast} />;
 }
 function CollectionsRoute() { const actions = useFamilyActions(); return <CollectionsPage onNew={actions.onNewCollection} />; }
 function CollectionRoute() { const { collectionID } = collectionDetailRoute.useParams(); const actions = useFamilyActions(); return <CollectionDetail id={collectionID} onToast={actions.onToast} />; }
 function SharesRoute() { const actions = useFamilyActions(); return <SharesPage onToast={actions.onToast} />; }
+function TrashRoute() { const actions = useFamilyActions(); return <TrashPage canPurge={actions.role === 'admin'} onToast={actions.onToast} />; }
 function GuestShareRoute() {
   const t = useT();
   const { token } = guestShareRoute.useParams();
@@ -47,10 +49,11 @@ const albumDetailRoute = createRoute({ getParentRoute: () => familyRoute, path: 
 const collectionsRoute = createRoute({ getParentRoute: () => familyRoute, path: '/collections', component: CollectionsRoute });
 const collectionDetailRoute = createRoute({ getParentRoute: () => familyRoute, path: '/collections/$collectionID', component: CollectionRoute });
 const sharesRoute = createRoute({ getParentRoute: () => familyRoute, path: '/shares', component: SharesRoute });
+const trashRoute = createRoute({ getParentRoute: () => familyRoute, path: '/trash', component: TrashRoute });
 const guestCollectionRoute = createRoute({ getParentRoute: () => rootRoute, path: '/guest/collect/$token', component: GuestCollectionRoute });
 const guestShareRoute = createRoute({ getParentRoute: () => rootRoute, path: '/guest/share/$token', component: GuestShareRoute });
 const routeTree = rootRoute.addChildren([
-  familyRoute.addChildren([albumsRoute, albumsIndexRoute, photosRoute, albumDetailRoute, collectionsRoute, collectionDetailRoute, sharesRoute]),
+  familyRoute.addChildren([albumsRoute, albumsIndexRoute, photosRoute, albumDetailRoute, collectionsRoute, collectionDetailRoute, sharesRoute, trashRoute]),
   guestCollectionRoute, guestShareRoute,
 ]);
 const router = createRouter({ routeTree });

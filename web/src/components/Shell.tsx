@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine } from 'lucide-react';
+import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine, Trash2 } from 'lucide-react';
 import { Brand } from './ui';
 import { DownloadDialog } from './LibraryPages';
 import { ShareDialog } from './SharingPages';
@@ -63,6 +63,7 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
       <nav className="flex flex-col gap-1" aria-label={t('nav.sharingCreate')}>
         <Link to="/shares" className={`nav-link ${active('/shares') ? 'active' : ''}`}><Link2 className="icon" /><span>{t('nav.shares')}</span></Link>
         <button className="nav-link" onClick={onNewAlbum}><FolderPlus className="icon" /><span>{t('nav.newAlbum')}</span></button>
+        <Link to="/trash" className={`nav-link ${active('/trash') ? 'active' : ''}`}><Trash2 className="icon" /><span>{t('nav.trash')}</span></Link>
       </nav>
       <div className="mt-auto pt-6 border-t border-line/70">
         <button className="w-full flex items-center gap-2.5 p-2 rounded-[10px] text-left hover:bg-soft" onClick={onSettings} aria-label={t('nav.settings')}>

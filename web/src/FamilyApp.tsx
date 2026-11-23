@@ -10,7 +10,7 @@ import { HeaderTitleProvider } from './components/HeaderTitleContext';
 import { LoginPage, SettingsDialog } from './components/AuthSettings';
 import { InviteDialog, NewCollectionDialog, ShareDialog } from './components/SharingPages';
 import { UploadDialog } from './components/UploadDialog';
-import { api, createAlbum, listAlbums, listCollections } from './lib/api';
+import { api, createAlbum, deleteAlbum, listAlbums, listCollections, restorePhotos, trashPhotos } from './lib/api';
 import { useT } from './lib/i18n';
 import type { Album, Collection, Role } from './lib/api';
 import './index.css';
@@ -26,31 +26,67 @@ export function FamilyApp() {
   const [shareAlbum, setShareAlbum] = useState<Album | null>(null);
   const [invite, setInvite] = useState<Collection | null>(null);
   const [search, setSearch] = useState(false);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(null);
   const [dark, setDark] = useState(() => { try { return localStorage.getItem('cg-theme') === 'dark'; } catch { return false; } });
   const client = useQueryClient();
   const navigate = useNavigate();
   const path = useRouterState({ select: state => state.location.pathname });
   const refreshAlbums = useCallback(async () => { const result = await listAlbums(); setAlbums(result.items); }, []);
+  const notify = useCallback((message: string) => setToast({ message }), []);
+  const deleteWholeAlbum = useCallback(async (albumID: string) => {
+    const album = albums.find(item => item.id === albumID);
+    if (!album || !window.confirm(t('albums.deleteConfirm', { name: album.name }))) return;
+    try {
+      await deleteAlbum(albumID);
+      client.invalidateQueries(); await refreshAlbums();
+      navigate({ to: '/albums' });
+      setToast({
+        message: t('albums.deleted', { name: album.name }),
+        action: {
+          label: t('trash.undo'),
+          run: () => { /* restoring the album means restoring its photos, handled in the trash page */ navigate({ to: '/trash' }); },
+        },
+      });
+    } catch (reason) { setToast({ message: reason instanceof Error ? reason.message : t('albums.deleteFailed') }); }
+  }, [albums, client, navigate, refreshAlbums, t]);
+  // Moving photos to the trash always offers undo: there are no per-user
+  // accounts and no audit trail, so a wrong click would otherwise be final.
+  const moveToTrash = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      const result = await trashPhotos(ids);
+      client.invalidateQueries(); refreshAlbums();
+      setToast({
+        message: t('trash.moved', { count: result.trashed }),
+        action: {
+          label: t('trash.undo'),
+          run: () => {
+            restorePhotos(ids).then(() => { client.invalidateQueries(); refreshAlbums(); setToast({ message: t('trash.restored', { count: ids.length }) }); })
+              .catch(reason => setToast({ message: reason instanceof Error ? reason.message : t('trash.restoreFailed') }));
+          },
+        },
+      });
+    } catch (reason) { setToast({ message: reason instanceof Error ? reason.message : t('trash.moveFailed') }); }
+  }, [client, refreshAlbums, t]);
   useEffect(() => { api<{ role: Role }>('/auth/session').then(result => setRole(result.role)).catch(() => setRole(null)); }, []);
-  useEffect(() => { if (role && role !== 'loading') refreshAlbums().catch(reason => setToast(reason.message)); }, [role, refreshAlbums]);
+  useEffect(() => { if (role && role !== 'loading') refreshAlbums().catch(reason => setToast({ message: reason.message })); }, [role, refreshAlbums]);
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { localStorage.setItem('cg-theme', dark ? 'dark' : 'light'); } catch { /* storage optional */ } }, [dark]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearch(true); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
   if (role === 'loading') return <main className="min-h-dvh grid place-items-center"><LoaderCircle className="w-7 h-7 animate-spin text-accent" /></main>;
   if (!role) return <LoginPage onLogin={value => { setRole(value); client.clear(); }} />;
   const initialAlbum = path.startsWith('/albums/') ? path.split('/').pop() || albums[0]?.id || '' : albums[0]?.id || '';
   return <HeaderTitleProvider><Shell role={role} albumCount={albums.length} onUpload={() => setUpload(true)} onNewAlbum={() => setNewAlbum(true)} onNewCollection={() => setNewCollection(true)} onSettings={() => setSettings(true)}>
-    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onToast: setToast }}>
+    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: moveToTrash, onDeleteAlbum: deleteWholeAlbum, onToast: notify }}>
       <Outlet />
     </FamilyActionsContext.Provider>
     {newAlbum && <NewAlbumDialog onClose={() => setNewAlbum(false)} onCreated={async album => { await refreshAlbums(); setNewAlbum(false); navigate({ to: '/albums/$albumID', params: { albumID: album.id } }); }} />}
     {upload && <UploadDialog albums={albums} initialAlbum={initialAlbum} onClose={() => setUpload(false)} onComplete={() => { client.invalidateQueries(); refreshAlbums(); }} />}
     {newCollection && <NewCollectionDialog albums={albums} onClose={() => setNewCollection(false)} onCreated={setInvite} />}
     {invite && <InviteDialog collection={invite} onClose={() => setInvite(null)} />}
-    {shareAlbum && <ShareDialog album={shareAlbum} onClose={() => setShareAlbum(null)} onCreated={() => { client.invalidateQueries({ queryKey: ['albums'] }); setToast(t('share.created')); }} />}
+    {shareAlbum && <ShareDialog album={shareAlbum} onClose={() => setShareAlbum(null)} onCreated={() => { client.invalidateQueries({ queryKey: ['albums'] }); setToast({ message: t('share.created') }); }} />}
     {settings && <SettingsDialog role={role} dark={dark} onTheme={() => setDark(value => !value)} onClose={() => setSettings(false)} onLogout={async () => { await api('/auth/logout', { method: 'POST', body: '{}' }); setRole(null); setSettings(false); }} />}
     {search && <SearchDialog onClose={() => setSearch(false)} />}
-    {toast && <Toast message={toast} onClose={() => setToast('')} />}
+    {toast && <Toast message={toast.message} action={toast.action} onClose={() => setToast(null)} />}
   </Shell></HeaderTitleProvider>;
 }
 function NewAlbumDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (album: Album) => void }) {
@@ -74,6 +110,8 @@ export type FamilyActions = {
   onNewAlbum: () => void;
   onNewCollection: () => void;
   onShare: (album: Album) => void;
+  onTrash: (ids: string[]) => void;
+  onDeleteAlbum: (albumID: string) => void;
   onToast: (message: string) => void;
 };
 export const FamilyActionsContext = createContext<FamilyActions | null>(null);
