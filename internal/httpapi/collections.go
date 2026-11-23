@@ -185,7 +185,7 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "COLLECTION_NOT_FOUND", T(r)("collection_not_found"))
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash FROM submission_items WHERE collection_id=? AND status='pending'`, collectionID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,taken_at FROM submission_items WHERE collection_id=? AND status='pending'`, collectionID)
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -193,13 +193,14 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	type importItem struct {
 		id, name, key, preview, thumb, mime, contributor, hash string
+		takenAt                                                string
 		size                                                   int64
 		width, height                                          int
 	}
 	pendingItems := make([]importItem, 0)
 	for rows.Next() {
 		var item importItem
-		if err := rows.Scan(&item.id, &item.name, &item.key, &item.preview, &item.thumb, &item.mime, &item.size, &item.width, &item.height, &item.contributor, &item.hash); err != nil {
+		if err := rows.Scan(&item.id, &item.name, &item.key, &item.preview, &item.thumb, &item.mime, &item.size, &item.width, &item.height, &item.contributor, &item.hash, &item.takenAt); err != nil {
 			a.internal(w, err)
 			return
 		}
@@ -251,12 +252,17 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		timestamp := now()
+		// Keep the capture time the guest's file carried, if any.
+		takenAt := item.takenAt
+		if takenAt == "" {
+			takenAt = timestamp
+		}
 		tx, err := a.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			a.internal(w, err)
 			return
 		}
-		_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, name, dest, destPreview, destThumb, mime, size, width, height, item.contributor, item.hash, dedupKeyFor(item.hash, false), timestamp, timestamp)
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, name, dest, destPreview, destThumb, mime, size, width, height, item.contributor, item.hash, dedupKeyFor(item.hash, false), takenAt, timestamp)
 		if err == nil {
 			_, err = tx.ExecContext(r.Context(), `UPDATE submission_items SET status='imported',photo_id=?,imported_at=? WHERE id=? AND status='pending'`, photoID, timestamp, id)
 		}

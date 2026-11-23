@@ -2,6 +2,7 @@ import { translate, currentLocale } from './i18n';
 import { api } from './api';
 import type { DuplicateCheck, UploadGrant } from './api';
 import { getDisplayName } from './identity';
+import { captureTimeOf } from './exif';
 import { decodeImage, resolveMime, resizeToWebp, SUPPORTED_MIME } from './decode';
 
 const t = (key: string, vars?: Record<string, string | number>) => translate(currentLocale(), key, vars);
@@ -39,7 +40,10 @@ export async function uploadPhoto(file: File, albumID: string, options: UploadOp
   if (!SUPPORTED_MIME.includes(mime)) throw new Error(t('upload.unsupportedType'));
   if (file.size > 200 * 1024 * 1024) throw new Error(t('upload.tooLarge'));
   const { width, height, thumb, preview } = await derivatives(file);
-  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime, width, height, contributor: getDisplayName(), content_hash: options.contentHash || '', allow_duplicate: !!options.allowDuplicate }) });
+  // The capture time comes from the file, so an album sorts by when the photo
+  // was taken rather than by when it happened to be uploaded.
+  const takenAt = await captureTimeOf(file);
+  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime, width, height, contributor: getDisplayName(), content_hash: options.contentHash || '', allow_duplicate: !!options.allowDuplicate, taken_at: takenAt || '' }) });
   await transfer(file, grant, onProgress);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
   const result = await api<{ id: string }>(`/uploads/${grant.id}/complete`, { method: 'POST', body: JSON.stringify({ parts: completedParts(grant.id) }) });
@@ -51,7 +55,8 @@ export async function uploadGuestPhoto(file: File, message: string, options: Upl
   const mime = resolveMime(file);
   if (!SUPPORTED_MIME.includes(mime)) throw new Error(t('upload.pickPhoto'));
   const { width, height, thumb, preview } = await derivatives(file);
-  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime, width, height, message, content_hash: options.contentHash || '' }) });
+  const takenAt = await captureTimeOf(file);
+  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime, width, height, message, content_hash: options.contentHash || '', taken_at: takenAt || '' }) });
   await transfer(file, grant, onProgress);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
   const result = await api<{ id: string }>('/guest/collections/uploads/' + grant.id + '/complete', { method: 'POST', body: JSON.stringify({ parts: completedParts(grant.id) }) });

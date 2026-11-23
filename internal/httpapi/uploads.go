@@ -24,6 +24,30 @@ type uploadRequest struct {
 	ContentHash string `json:"content_hash"`
 	// AllowDuplicate lets the user add a photo the album already contains.
 	AllowDuplicate bool `json:"allow_duplicate"`
+	// TakenAt is the EXIF capture time as an RFC3339 UTC string, read from the
+	// file in the browser. Empty means the file had none and the upload time is
+	// used instead.
+	TakenAt string `json:"taken_at"`
+}
+
+// cleanTakenAt validates a client-supplied capture time. It must be RFC3339 and
+// plausible: a timestamp far in the future would sort above every other photo,
+// and one before photography existed is certainly wrong. An unusable value is
+// dropped rather than rejected, because the file itself is still fine.
+func cleanTakenAt(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return ""
+	}
+	now := time.Now().UTC()
+	if parsed.Before(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)) || parsed.After(now.Add(24*time.Hour)) {
+		return ""
+	}
+	return parsed.UTC().Format(time.RFC3339Nano)
 }
 
 // cleanContributor trims and caps the client-supplied uploader name. The name is
@@ -89,7 +113,7 @@ func (a *API) createUpload(w http.ResponseWriter, r *http.Request) {
 	if input.AllowDuplicate {
 		allow = 1
 	}
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,content_hash,allow_duplicate,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), hash, allow, now())
+	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,content_hash,allow_duplicate,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), hash, allow, cleanTakenAt(input.TakenAt), now())
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -169,7 +193,7 @@ func (a *API) completeFamilyUpload(w http.ResponseWriter, r *http.Request, id st
 	}
 	var input uploadRequest
 	var allowDuplicate int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,contributor,content_hash,allow_duplicate FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Contributor, &input.ContentHash, &allowDuplicate); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,contributor,content_hash,allow_duplicate,taken_at FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Contributor, &input.ContentHash, &allowDuplicate, &input.TakenAt); err != nil {
 		a.internal(w, err)
 		return
 	}
@@ -183,13 +207,18 @@ func (a *API) completeFamilyUpload(w http.ResponseWriter, r *http.Request, id st
 	}
 	photoID := newID()
 	timestamp := now()
+	// Sort by when the photo was taken, falling back to when it arrived.
+	takenAt := input.TakenAt
+	if takenAt == "" {
+		takenAt = timestamp
+	}
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		a.internal(w, err)
 		return
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.Contributor, input.ContentHash, dedupKeyFor(input.ContentHash, allowDuplicate == 1), timestamp, timestamp)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.Contributor, input.ContentHash, dedupKeyFor(input.ContentHash, allowDuplicate == 1), takenAt, timestamp)
 	if err != nil {
 		// A concurrent upload of the same bytes won the race between the
 		// pre-check and this insert. Report it as the same duplicate error so
@@ -325,7 +354,7 @@ func (a *API) createGuestUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID()
 	key := "collections/" + p.ScopeID + "/originals/" + id + "/original"
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,message,content_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "collection", p.ScopeID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, strings.TrimSpace(input.Message), hash, now())
+	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,message,content_hash,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "collection", p.ScopeID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, strings.TrimSpace(input.Message), hash, cleanTakenAt(input.TakenAt), now())
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -355,7 +384,7 @@ func (a *API) completeGuestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input uploadRequest
-	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,message,content_hash FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Message, &input.ContentHash); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,message,content_hash,taken_at FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Message, &input.ContentHash, &input.TakenAt); err != nil {
 		a.internal(w, err)
 		return
 	}
@@ -373,7 +402,7 @@ func (a *API) completeGuestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO submission_items(id,collection_id,session_hash,contributor,message,name,original_key,preview_key,thumb_key,mime,size,width,height,content_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, collectionID, p.Hash, p.Name, input.Message, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.ContentHash, now()); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO submission_items(id,collection_id,session_hash,contributor,message,name,original_key,preview_key,thumb_key,mime,size,width,height,content_hash,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, collectionID, p.Hash, p.Name, input.Message, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.ContentHash, input.TakenAt, now()); err != nil {
 		a.internal(w, err)
 		return
 	}

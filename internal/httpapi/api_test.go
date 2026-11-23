@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RainSunMe/family-gallery/internal/database"
 )
@@ -311,5 +312,31 @@ func TestTrashedPhotoLeavesDedupIndex(t *testing.T) {
 	// A photo in the trash must not block uploading the same bytes again.
 	if err := insert("second"); err != nil {
 		t.Fatalf("upload after trashing the duplicate must be allowed: %v", err)
+	}
+}
+
+func TestCleanTakenAt(t *testing.T) {
+	// A well-formed timestamp is normalised to UTC with nanosecond precision.
+	got := cleanTakenAt("2026-08-03T10:11:12+08:00")
+	if got != "2026-08-03T02:11:12Z" {
+		t.Fatalf("expected the time to be converted to UTC, got %q", got)
+	}
+	// An unusable value is dropped rather than rejected: the file itself is fine.
+	for _, bad := range []string{
+		"",
+		"   ",
+		"not a date",
+		"2026-08-03",           // date only, not RFC3339
+		"1899-12-31T23:59:59Z", // before photography
+		"2999-01-01T00:00:00Z", // far in the future
+	} {
+		if got := cleanTakenAt(bad); got != "" {
+			t.Fatalf("expected %q to be dropped, got %q", bad, got)
+		}
+	}
+	// A capture time slightly ahead of now is legitimate: clocks drift, and a
+	// photo taken this morning in a timezone ahead of the server must survive.
+	if cleanTakenAt(time.Now().UTC().Add(2*time.Hour).Format(time.RFC3339)) == "" {
+		t.Fatal("a near-future capture time must be accepted")
 	}
 }

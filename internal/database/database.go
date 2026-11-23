@@ -83,6 +83,17 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("migrate trash column: %w", err)
 		}
 	}
+	// Capture time read from EXIF travels with the pending upload so the photo
+	// row can sort by when it was taken rather than when it was uploaded.
+	for _, statement := range []string{
+		`ALTER TABLE upload_sessions ADD COLUMN taken_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE submission_items ADD COLUMN taken_at TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate taken_at column: %w", err)
+		}
+	}
 	return db, nil
 }
 

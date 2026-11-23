@@ -30,6 +30,7 @@ The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANG
 - [Configuration](#configuration)
 - [Object storage requirements](#object-storage-requirements)
 - [HEIC photos](#heic-photos)
+- [Capture time](#capture-time)
 - [Architecture](#architecture)
 - [Development and tests](#development-and-tests)
 - [Current limitations](#current-limitations)
@@ -274,6 +275,18 @@ Originals are never transcoded. The viewer shows the WebP preview for HEIC
 because Chromium cannot render the original, and the download button still hands
 back the untouched HEIC file.
 
+## Capture time
+
+Photos are sorted and grouped by **when they were taken**, read from the EXIF
+`DateTimeOriginal` tag in the browser. EXIF stores a wall-clock time with no
+offset, so it is interpreted in the uploader's own time zone and converted to UTC
+before it is sent. Files without a usable timestamp fall back to the upload time.
+
+Photos uploaded before this existed keep their old timestamps; nothing is
+rewritten retroactively.
+
+See [docs/08-exif-time.md](./docs/08-exif-time.md) for the parser and its limits.
+
 The Content-Security-Policy includes `'wasm-unsafe-eval'`, which allows
 WebAssembly to compile without permitting `eval()` of JavaScript.
 
@@ -317,6 +330,7 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 - The viewer shows the WebP preview for HEIC because browsers other than Safari cannot render the original. The original file is stored untouched and still downloads as HEIC.
 - Duplicate detection compares exact bytes within one album. The same picture re-encoded or exported from HEIC counts as a different file, and the same file added to two albums is stored twice.
 - Deleting moves photos to a trash that is emptied after `TRASH_RETENTION`. There is no per-photo history, so "who deleted this" is only as trustworthy as the name typed into that browser.
+- Capture time comes from EXIF when the file has it. Photos uploaded before this feature, or files without usable EXIF, keep their upload time.
 - Packaging runs inside the API process with a single worker loop. At larger scale, split it into a separate worker with durable leases.
 - Both SQLite and the object store need their own backups, and restores should be rehearsed regularly.
 
