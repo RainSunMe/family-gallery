@@ -210,6 +210,27 @@ Note: a language picked in the settings dialog is stored per browser and always 
 | `LOGIN_MAX_ATTEMPTS` | `10` | Failed attempts before a block. |
 | `LOGIN_BLOCK_DURATION` | `5m` | Block duration after too many failures. |
 
+### Duplicates
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DEDUP_ENABLED` | `true` | Refuse a second copy of identical bytes in the same album. |
+| `DEDUP_BACKFILL` | `false` | Hash photos uploaded before dedup existed, once at startup. |
+
+The browser hashes every file with SHA-256 in a worker before uploading, so the
+server can answer "this is already in this album" without transferring the
+bytes. A match is never silently dropped: the upload dialog lists what it found
+and lets you add the photo anyway. Comparison is per album and by exact file
+contents — the same picture re-encoded, screenshotted or exported from HEIC is a
+different file and uploads normally.
+
+Turning `DEDUP_BACKFILL` on makes the first start read every existing original
+back out of the bucket to hash it, which is why it is off by default. Photos
+uploaded before dedup stays unhashed until you do, and the dialog says how many
+of those an album holds.
+
+See [docs/05-photo-dedup.md](./docs/05-photo-dedup.md) for the full design.
+
 ## Object storage requirements
 
 Any S3-compatible service works: **Garage, MinIO, SeaweedFS, Ceph RGW, AWS S3**, and others.
@@ -263,6 +284,7 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 ## Current limitations
 
 - JPEG, PNG, WebP and GIF are fully supported in the browser; HEIC/HEIF and video have no preview or transcoding pipeline yet.
+- Duplicate detection compares exact bytes within one album. The same picture re-encoded or exported from HEIC counts as a different file, and the same file added to two albums is stored twice.
 - The delete and trash UI is not exposed yet.
 - Packaging runs inside the API process with a single worker loop. At larger scale, split it into a separate worker with durable leases.
 - Both SQLite and the object store need their own backups, and restores should be rehearsed regularly.

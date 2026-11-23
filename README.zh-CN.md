@@ -201,6 +201,23 @@ SITE_DESCRIPTION=家庭相册
 | `LOGIN_MAX_ATTEMPTS` | `10` | 连续失败上限 |
 | `LOGIN_BLOCK_DURATION` | `5m` | 失败封禁时长 |
 
+### 重复照片
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DEDUP_ENABLED` | `true` | 同一相册内拒绝字节完全相同的照片 |
+| `DEDUP_BACKFILL` | `false` | 启动时为去重上线前的旧照片补算哈希 |
+
+浏览器会在 Web Worker 里先算 SHA-256 再上传，所以服务端不传字节也能回答
+「这张已经在相册里了」。命中重复不会静默丢弃：上传弹窗会列出找到的照片，并允许
+你仍然添加。比对按相册、按文件内容——重新编码、截图、从 HEIC 导出的同一画面是
+不同文件，会正常上传。
+
+打开 `DEDUP_BACKFILL` 会让首次启动把库里所有原图从 Bucket 读一遍来算哈希，
+所以默认关闭。没有回填时旧照片不参与比对，弹窗会如实显示相册里有多少张这样的照片。
+
+完整设计见 [docs/05-photo-dedup.md](./docs/05-photo-dedup.md)。
+
 ## 对象存储要求
 
 任何兼容 S3 的服务都可以：**Garage、MinIO、SeaweedFS、Ceph RGW、AWS S3** 等。
@@ -253,6 +270,7 @@ docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
 ## 当前边界
 
 - 浏览器端完整支持 JPG、PNG、WebP、GIF；HEIC/HEIF 与视频暂无预览或转码链路。
+- 去重只比对同一相册内的精确字节：重新编码或从 HEIC 导出的同一画面算作不同文件，同一文件传到两个相册会存两份。
 - 删除与回收站 UI 尚未开放。
 - 打包任务运行在 API 进程内，单 worker 循环；大规模使用时可拆分为独立 worker 并加入持久租约。
 - SQLite 与对象存储都需要自行备份，并定期演练恢复。

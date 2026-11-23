@@ -12,20 +12,24 @@ export type Photo = {
 };
 export type PhotoPage = { items: Photo[]; urls: Record<string, string>; next_cursor: string };
 export type Contributor = { name: string; count: number };
-export type CollectionPhoto = Photo & { url: string; contributor: string; created_at: string; message: string; status: 'pending' | 'imported' };
+export type CollectionPhoto = Photo & { url: string; contributor: string; created_at: string; message: string; status: 'pending' | 'imported' | 'duplicate' };
 export type Collection = {
   id: string; name: string; description: string; album_id: string; status: 'active' | 'ended';
   expires_at: string; batch_limit: number; allow_message: boolean; created_at: string;
-  photo_count: number; pending_count: number; imported_count: number;
+  photo_count: number; pending_count: number; imported_count: number; duplicate_count: number;
   contributors: Contributor[]; photos: CollectionPhoto[]; invite_url: string;
 };
 export type Share = { id: string; album_id: string; album_name: string; album_cover_url: string; photo_count: number; expires_at: string; created_at: string; view_count: number; url: string };
 export type DownloadPackage = { id: string; part: number; size: string; file_count: number };
 export type DownloadJob = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; progress: number; error: string; packages: DownloadPackage[]; expires_at: string };
 export type UploadGrant = { id: string; key: string; url: string; thumb_url: string; preview_url: string; multipart_upload_id: string; part_size: number };
+export type ExistingPhoto = { id: string; name: string; contributor: string; taken_at: string; thumb_url: string };
+export type DuplicateCheck = { duplicates: Record<string, ExistingPhoto>; new: string[]; legacy_photos: number };
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  // `details` carries the parsed error body so a caller can react to fields
+  // beyond code/message, such as the photo a duplicate upload collided with.
+  constructor(public status: number, public code: string, message: string, public details?: unknown) { super(message); }
 }
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const separator = path.includes('?') ? '&' : '?';
@@ -36,9 +40,9 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
   });
   if (!response.ok) {
-    let message = translate(currentLocale(), 'api.requestFailed'); let code = 'REQUEST_FAILED';
-    try { const data = await response.json(); message = data.error?.message || message; code = data.error?.code || code; } catch { /* non-json error */ }
-    throw new ApiError(response.status, code, message);
+    let message = translate(currentLocale(), 'api.requestFailed'); let code = 'REQUEST_FAILED'; let details: unknown;
+    try { const data = await response.json(); message = data.error?.message || message; code = data.error?.code || code; details = data; } catch { /* non-json error */ }
+    throw new ApiError(response.status, code, message, details);
   }
   if (response.status === 204) return undefined as T;
   return response.json();
@@ -56,7 +60,7 @@ export const createCollection = (input: { name: string; description: string; alb
 export const createShare = (input: { album_id: string; expiry_days: number }) => api<{ id: string; url: string }>('/shares', { method: 'POST', body: JSON.stringify(input) });
 export const revokeShare = (id: string) => api<void>(`/shares/${id}`, { method: 'DELETE' });
 export const closeCollection = (id: string) => api<{ status: string }>(`/collections/${id}/close`, { method: 'POST', body: '{}' });
-export const importCollection = (id: string, itemIDs: string[] = []) => api<{ imported: number; failed: number }>(`/collections/${id}/imports`, { method: 'POST', body: JSON.stringify({ item_ids: itemIDs }) });
+export const importCollection = (id: string, itemIDs: string[] = []) => api<{ imported: number; failed: number; skipped_duplicates: number }>(`/collections/${id}/imports`, { method: 'POST', body: JSON.stringify({ item_ids: itemIDs }) });
 export const createDownload = (input: { album_id: string; photo_ids: string[]; mode: 'single' | 'batch' }, guestToken = '') => api<{ id: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads`, { method: 'POST', body: JSON.stringify(input) });
 export const getDownload = (id: string, guestToken = '') => api<DownloadJob>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}`);
 export const signDownload = (id: string, packageID: string, guestToken = '') => api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}/sign`, { method: 'POST', body: JSON.stringify({ package_id: packageID }) });

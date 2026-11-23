@@ -23,7 +23,7 @@ export function CollectionDetail({ id, onToast }: { id: string; onToast: (messag
   if (isLoading || !collection) return <div className="page"><Loading rows={1} /></div>;
   const photos = collection.photos;
   const urls = Object.fromEntries(photos.map(photo => [photo.id, photo.url]));
-  const origins = Object.fromEntries(photos.map(photo => [photo.id, photo.status === 'imported' ? t('grid.imported') : t('collection.pending')]));
+  const origins = Object.fromEntries(photos.map(photo => [photo.id, photo.status === 'imported' ? t('grid.imported') : photo.status === 'duplicate' ? t('collection.duplicateStatus') : t('collection.pending')]));
   const contributorNames = Object.fromEntries(photos.map(photo => [photo.id, photo.contributor]));
   const viewerPhotos: Photo[] = photos.map(photo => ({ ...photo, album_id: collection.album_id, taken_at: photo.created_at }));
   async function importItems(onlySelected: boolean) {
@@ -31,7 +31,7 @@ export function CollectionDetail({ id, onToast }: { id: string; onToast: (messag
     const ids = onlySelected ? [...selected] : [];
     if (onlySelected && !ids.length) { onToast(t('collection.selectFirst')); return; }
     setBusy(true);
-    try { const result = await importCollection(collection.id, ids); await client.invalidateQueries({ queryKey: ['collection', id] }); await client.invalidateQueries({ queryKey: ['albums'] }); await client.invalidateQueries({ queryKey: ['collections'] }); setSelected(new Set()); setSelecting(false); onToast(t('collection.importedToast', { count: result.imported, extra: result.failed ? t('collection.importedExtra', { count: result.failed }) : '' })); }
+    try { const result = await importCollection(collection.id, ids); await client.invalidateQueries({ queryKey: ['collection', id] }); await client.invalidateQueries({ queryKey: ['albums'] }); await client.invalidateQueries({ queryKey: ['collections'] }); setSelected(new Set()); setSelecting(false); const extra = (result.failed ? t('collection.importedExtra', { count: result.failed }) : '') + (result.skipped_duplicates ? t('collection.duplicatesExtra', { count: result.skipped_duplicates }) : ''); onToast(t('collection.importedToast', { count: result.imported, extra })); }
     catch (reason) { onToast(reason instanceof Error ? reason.message : t('collection.importFailed')); }
     finally { setBusy(false); }
   }

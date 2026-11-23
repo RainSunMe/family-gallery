@@ -1,12 +1,19 @@
 import { translate, currentLocale } from './i18n';
 import { api } from './api';
-import type { UploadGrant } from './api';
+import type { DuplicateCheck, UploadGrant } from './api';
 import { getDisplayName } from './identity';
 
 const t = (key: string, vars?: Record<string, string | number>) => translate(currentLocale(), key, vars);
 
 export type UploadInput = { file: File; width: number; height: number; message?: string };
 export type UploadProgress = (completed: number, total: number, label: string) => void;
+export type UploadOptions = { contentHash?: string; allowDuplicate?: boolean };
+
+/** Ask the server which of these hashes the album already contains. */
+export async function checkDuplicates(albumID: string, hashes: string[]): Promise<DuplicateCheck> {
+  if (!hashes.length) return { duplicates: {}, new: [], legacy_photos: 0 };
+  return api<DuplicateCheck>('/uploads/check', { method: 'POST', body: JSON.stringify({ album_id: albumID, hashes }) });
+}
 
 async function imageDimensions(file: File): Promise<{ width: number; height: number }> {
   if (!file.type.startsWith('image/') || /heic|heif/i.test(file.type)) return { width: 0, height: 0 };
@@ -40,12 +47,12 @@ async function put(url: string, body: Blob): Promise<string> {
   return response.headers.get('ETag')?.replaceAll('"', '') || '';
 }
 
-export async function uploadPhoto(file: File, albumID: string, onProgress?: UploadProgress): Promise<string> {
+export async function uploadPhoto(file: File, albumID: string, options: UploadOptions = {}, onProgress?: UploadProgress): Promise<string> {
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error(t('upload.unsupportedType'));
   if (file.size > 200 * 1024 * 1024) throw new Error(t('upload.tooLarge'));
   const { width, height } = await imageDimensions(file);
   if (!width || !height) throw new Error(t('upload.readDimensions'));
-  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime: file.type, width, height, contributor: getDisplayName() }) });
+  const grant = await api<UploadGrant>('/uploads', { method: 'POST', body: JSON.stringify({ album_id: albumID, name: file.name, size: file.size, mime: file.type, width, height, contributor: getDisplayName(), content_hash: options.contentHash || '', allow_duplicate: !!options.allowDuplicate }) });
   await transfer(file, grant, onProgress);
   const [thumb, preview] = await Promise.all([derivative(file, width, height, 480), derivative(file, width, height, 1600)]);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
@@ -54,11 +61,11 @@ export async function uploadPhoto(file: File, albumID: string, onProgress?: Uplo
   return result.id;
 }
 
-export async function uploadGuestPhoto(file: File, message: string, onProgress?: UploadProgress): Promise<string> {
+export async function uploadGuestPhoto(file: File, message: string, options: UploadOptions = {}, onProgress?: UploadProgress): Promise<string> {
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error(t('upload.pickPhoto'));
   const { width, height } = await imageDimensions(file);
   if (!width || !height) throw new Error(t('upload.readDimensionsShort'));
-  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime: file.type, width, height, message }) });
+  const grant = await api<UploadGrant>('/guest/collections/uploads', { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size, mime: file.type, width, height, message, content_hash: options.contentHash || '' }) });
   await transfer(file, grant, onProgress);
   const [thumb, preview] = await Promise.all([derivative(file, width, height, 480), derivative(file, width, height, 1600)]);
   await Promise.all([put(grant.thumb_url, thumb), put(grant.preview_url, preview)]);
