@@ -52,7 +52,11 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
   const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 });
   const [drag, setDrag] = useState<Offset>({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-  const [transition, setTransition] = useState<'idle' | 'next' | 'previous'>('idle');
+  // While true the track has no transition, so the index swap can reset the
+  // offset in the same frame without the reset being animated.
+  const [snapping, setSnapping] = useState(false);
+  // Crossfade used when jumping more than one photo (filmstrip clicks).
+  const [navFade, setNavFade] = useState<'out' | 'in' | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const transformRef = useRef({ scale: 1, offset: { x: 0, y: 0 } });
@@ -126,13 +130,32 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
   const navigate = useCallback((nextIndex: number) => {
     if (nextIndex < 0 || nextIndex >= photos.length || nextIndex === index || transitionRef.current) return;
     transitionRef.current = true;
-    const direction = nextIndex > index ? 'next' : 'previous';
-    setTransition(direction);
-    setDrag({ x: direction === 'next' ? -Math.min(window.innerWidth * .16, 100) : Math.min(window.innerWidth * .16, 100), y: 0 });
+    if (Math.abs(nextIndex - index) === 1) {
+      // Slide a full stage width so the track ends up parked exactly on the next
+      // slide. Starting from the current drag offset makes a released swipe
+      // continue seamlessly instead of jumping.
+      const width = stageRef.current?.clientWidth || window.innerWidth;
+      setDrag({ x: nextIndex > index ? -width : width, y: 0 });
+      timers.current.push(setTimeout(() => {
+        // At the target offset the next slide is already centred, so swapping the
+        // index and resetting the track with the transition disabled is visually
+        // identical — no flash.
+        setSnapping(true);
+        setIndex(nextIndex); resetTransform(); setShowInfo(false); setClosingInfo(false);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          setSnapping(false); transitionRef.current = false;
+        }));
+      }, 340));
+      return;
+    }
+    // Only three slides are rendered, so a multi-photo jump cannot be expressed
+    // as one continuous slide; crossfade instead of sliding the wrong photo in.
+    setNavFade('out');
     timers.current.push(setTimeout(() => {
-      setIndex(nextIndex); resetTransform(); setShowInfo(false); setClosingInfo(false); setDrag({ x: 0, y: 0 });
-      timers.current.push(setTimeout(() => { setTransition('idle'); transitionRef.current = false; }, 300));
-    }, 150));
+      setIndex(nextIndex); resetTransform(); setShowInfo(false); setClosingInfo(false);
+      setNavFade('in');
+      timers.current.push(setTimeout(() => { setNavFade(null); transitionRef.current = false; }, 180));
+    }, 170));
   }, [index, photos.length, resetTransform]);
 
   useEffect(() => {
@@ -276,7 +299,9 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
   }
 
   return createPortal(<div className="photo-viewer" role="dialog" aria-modal="true" aria-label={t('viewer.dialog')}>
-    <div className="viewer-backdrop" key={photo.id}><ViewerBackdrop photo={photo} guestToken={guestToken} /></div>
+    {/* No key: remounting the backdrop restarted its fade-in and reloaded the
+        preview on every step, which read as a flash behind the photo. */}
+    <div className="viewer-backdrop"><ViewerBackdrop photo={photo} guestToken={guestToken} /></div>
     <header className="viewer-header">
       <button className="icon-btn viewer-control" onClick={onClose} aria-label={t('viewer.close')} autoFocus><X className="icon" /></button>
       <div className="min-w-0 flex-1"><span className="block truncate text-xs text-white/85">{photo.name}</span><span className="block text-[10px] text-white/55 mt-0.5">{index + 1} / {photos.length}</span></div>
@@ -284,9 +309,9 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
       <button className="icon-btn viewer-control" aria-label={t('viewer.download')} onClick={async () => { const result = await signPhoto(photo.id, 'original', guestToken, true); window.location.assign(result.url); }}><Download className="icon" /></button>
       <button className="icon-btn viewer-control" data-viewer-control="info" aria-label={t('viewer.info')} aria-expanded={showInfo} onClick={openInfo}><Info className="icon" /></button>
     </header>
-    <div ref={stageRef} className={`viewer-stage ${dragging ? 'is-dragging' : ''} transition-${transition}`}
+    <div ref={stageRef} className={`viewer-stage ${dragging ? 'is-dragging' : ''} ${snapping ? 'is-snapping' : ''} ${navFade ? 'is-navfade' : ''}`}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onDoubleClick={doubleClick}>
-      <div className="viewer-track" style={{ transform: `translate3d(${drag.x}px,${drag.y}px,0)`, opacity: drag.y ? Math.max(.35, 1 - drag.y / 600) : 1 }}>
+      <div className="viewer-track" style={{ transform: `translate3d(${drag.x}px,${drag.y}px,0)`, opacity: navFade === 'out' ? 0 : drag.y ? Math.max(.35, 1 - drag.y / 600) : 1 }}>
         {[-1, 0, 1].map(position => {
           const itemIndex = index + position;
           if (itemIndex < 0 || itemIndex >= photos.length) return null;
