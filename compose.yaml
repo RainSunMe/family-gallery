@@ -7,7 +7,7 @@
 
 services:
   app:
-    image: family-gallery:latest
+    image: ghcr.io/rainsunme/family-gallery:latest
     build:
       context: .
       dockerfile: Dockerfile
