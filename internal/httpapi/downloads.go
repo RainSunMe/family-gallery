@@ -176,6 +176,7 @@ func (a *API) RunWorker(ctx context.Context) {
 				a.processDownload(ctx, jobID)
 			}
 			a.cleanupJobs(ctx)
+			a.purgeTrash(ctx)
 		}
 	}
 }

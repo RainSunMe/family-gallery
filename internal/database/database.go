@@ -70,6 +70,19 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("migrate dedup index: %w", err)
 		}
 	}
+	// Trash: deleted_at already existed and every read path filters it. These
+	// columns only record who deleted a photo and which batch it belonged to, so
+	// deleting a whole album can be restored atomically.
+	for _, statement := range []string{
+		`ALTER TABLE photos ADD COLUMN deleted_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE photos ADD COLUMN trash_batch TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS photos_trash ON photos(deleted_at) WHERE deleted_at IS NOT NULL`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate trash column: %w", err)
+		}
+	}
 	return db, nil
 }
 

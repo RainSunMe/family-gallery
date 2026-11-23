@@ -51,6 +51,10 @@ type Config struct {
 	// DedupBackfill hashes existing photos on startup. Off by default: it reads
 	// every original back out of the bucket.
 	DedupBackfill bool
+
+	// TrashRetention is how long soft-deleted photos are kept before the worker
+	// removes them for good. Zero means "keep forever".
+	TrashRetention time.Duration
 }
 
 func Load() (Config, error) {
@@ -100,6 +104,7 @@ func Load() (Config, error) {
 		LoginBlockDuration: duration(get, "LOGIN_BLOCK_DURATION", 5*time.Minute),
 		DedupEnabled:       boolean(get, "DEDUP_ENABLED", true),
 		DedupBackfill:      boolean(get, "DEDUP_BACKFILL", false),
+		TrashRetention:     retention(get, "TRASH_RETENTION", 30*24*time.Hour),
 	}
 	if cfg.FamilyPassword == "" || cfg.AdminPassword == "" {
 		return Config{}, errors.New("FAMILY_PASSWORD and ADMIN_PASSWORD must be set")
@@ -164,6 +169,24 @@ func boolean(get func(string, string) string, key string, fallback bool) bool {
 	}
 	value, err := strconv.ParseBool(raw)
 	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+// retention parses a duration where an explicit zero means "keep forever".
+// duration() cannot express that: it treats any non-positive value as "use the
+// fallback", which would silently turn 0 into 30 days.
+func retention(get func(string, string) string, key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(get(key, ""))
+	if raw == "" {
+		return fallback
+	}
+	if raw == "0" {
+		return 0
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < 0 {
 		return fallback
 	}
 	return value
