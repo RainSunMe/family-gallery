@@ -1,18 +1,39 @@
 # Family Gallery · Self-hosted Family Photo Sharing
 
+[![CI](https://github.com/RainSunMe/family-gallery/actions/workflows/ci.yml/badge.svg)](https://github.com/RainSunMe/family-gallery/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/RainSunMe/family-gallery)](./LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
-[![License](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](./Dockerfile)
 
 **A private family photo album you host yourself.** Built with Go, SQLite and any S3-compatible object storage.
 Photos never pass through the application server: browsers upload directly to your own bucket, and the backend only issues short-lived signed URLs.
+
+Not another Immich. There is no face recognition, no AI search, no mobile app and no account system — just one shared family library, invite links that let grandparents upload without signing up, and read-only links you can revoke.
+
+<p align="center">
+  <img src="./docs/screenshots/01-albums.png" alt="Album list" width="820">
+</p>
 
 The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANGUAGE` decides which one a visitor sees first; after signing in, the language can be changed in the settings dialog, and `?lang=zh` / `?lang=en` overrides it for a single visit.
 
 > Keywords: self-hosted photo album · family photo sharing · photo collection · S3 · Garage · MinIO · Go · SQLite · React
 
 > 中文说明见 [README.zh-CN.md](./README.zh-CN.md).
+
+## Contents
+
+- [Why use it](#why-use-it)
+- [How it differs](#how-it-differs)
+- [Screenshots](#screenshots)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Object storage requirements](#object-storage-requirements)
+- [Architecture](#architecture)
+- [Development and tests](#development-and-tests)
+- [Current limitations](#current-limitations)
+- [Contributing and security](#contributing-and-security)
+- [License](#license)
 
 ## Why use it
 
@@ -25,13 +46,51 @@ The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANG
 | **Small footprint** | A single container image ships the frontend and the API; one data volume is enough to run it. |
 | **No account system** | Family and admin passphrases are separate, and sessions are stored as hashes. |
 
+## How it differs
+
+Roughly in order of how many people use them today. This is not a ranking — the
+right tool depends on what the family actually needs.
+
+| | Family Gallery | Immich | PhotoPrism | Ente Photos |
+| --- | --- | --- | --- | --- |
+| Primary goal | One shared family library | Full photo platform | AI-indexed library | Encrypted cloud |
+| Database | SQLite, one file | PostgreSQL + Redis | SQLite or MySQL | Postgres + Redis |
+| Media storage | Any S3-compatible bucket (required) | Local filesystem | Local filesystem | Local or S3 |
+| Mobile background backup | No | Yes | No | Yes |
+| Face / object recognition | No | Yes | Yes | No |
+| End-to-end encryption | No | No | No | Yes |
+| Guest upload without an account | Yes, scoped invite links | Shared links | No | No |
+| Per-photo uploader label | Yes, stored with the photo | Via user accounts | Via user accounts | Via user accounts |
+| Rough runtime footprint | One small container | Several containers, worker-heavy | Medium | Several containers |
+
+Pick Family Gallery when the family is small, the NAS already has an S3 bucket,
+and the hard part is getting photos *from* grandparents rather than organising
+tens of thousands of files. Pick Immich if you want a Google Photos replacement
+with phone backup and ML search. Pick Ente if end-to-end encryption is the
+priority.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Photo grid](./docs/screenshots/02-photos.png)<br>**Photo grid** — every tile carries the uploader's name | ![Viewer](./docs/screenshots/03-viewer.png)<br>**Viewer** — expiry-scoped original, with photo info |
+| ![Invite page](./docs/screenshots/05-invite.png)<br>**Invite page** — a guest uploads with no account | ![Sign-in](./docs/screenshots/06-login.png)<br>**Sign-in** — one shared passphrase, plus your name |
+
+
 ## Quick start
+
+Pull the published image, or build from source — either way you need a bucket and
+two passphrases first.
+
+```bash
+docker pull ghcr.io/rainsunme/family-gallery:latest
+```
 
 ```bash
 git clone https://github.com/RainSunMe/family-gallery.git
 cd family-gallery
 cp .env.example .env      # replace every REPLACE_WITH_* placeholder
-docker compose up -d --build
+docker compose up -d      # add --build to compile from source instead
 ```
 
 Then open `http://localhost:8080` and sign in with the family passphrase from `.env`.
@@ -40,6 +99,14 @@ Then open `http://localhost:8080` and sign in with the family passphrase from `.
 > In production, put the app behind an HTTPS reverse proxy and only expose its port.
 
 ### Without Compose
+
+```bash
+docker run -d --name gallery --env-file .env \
+  -p 127.0.0.1:8080:8080 -v gallery-data:/app/data \
+  ghcr.io/rainsunme/family-gallery:latest
+```
+
+Or build the image yourself:
 
 ```bash
 docker build -t family-gallery .
@@ -183,6 +250,14 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 - Packaging runs inside the API process with a single worker loop. At larger scale, split it into a separate worker with durable leases.
 - Both SQLite and the object store need their own backups, and restores should be rehearsed regularly.
 
+## Contributing and security
+
+Issues and focused pull requests are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for the local workflow and the few conventions this codebase cares about.
+
+Please **do not** report security problems in a public issue. Use the [security policy](./SECURITY.md) instead; it also documents the threat model and an operator hardening checklist.
+
 ## License
 
 [MIT](./LICENSE). Inter, Noto Sans SC and Fraunces under `web/public/fonts` are distributed under the SIL Open Font License, which ships alongside the fonts.
+
+The login background is an Unsplash photograph used under the Unsplash License; its source is recorded in `web/public/media/CREDITS.md`.

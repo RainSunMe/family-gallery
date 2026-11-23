@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a capability or an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is intentionally narrow: a private album for one family, not a
+        full photo platform. Requests that keep it small and self-hostable tend to
+        land; requests to turn it into Immich generally do not.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Describe the situation, not the solution. Who is stuck, and doing what?
+      placeholder: My parents upload from an iPhone and the HEIC files never show a preview.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including other tools that already solve this.
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit
+      options:
+        - label: This does not require an account system, social features or AI indexing
+          required: true
+        - label: I searched existing issues and discussions
+          required: true

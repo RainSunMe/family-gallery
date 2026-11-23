@@ -1,16 +1,37 @@
 # Family Gallery · 自托管家庭共享相册
 
+[![CI](https://github.com/RainSunMe/family-gallery/actions/workflows/ci.yml/badge.svg)](https://github.com/RainSunMe/family-gallery/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/RainSunMe/family-gallery)](./LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
-[![License](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](./Dockerfile)
 
 > 这是 [README.md](./README.md) 的中文版本。界面为完整双语（简体中文 / English），`DEFAULT_LANGUAGE` 决定首次打开时的语言；登录后可在设置页切换，`?lang=zh` / `?lang=en` 可临时覆盖。
 
 一个**自托管的家庭共享相册**，面向家人之间的照片收集、整理与只读分享。
 照片直传你自己拥有的私有 S3，应用只负责身份、权限、元数据与签名。没有第三方账号，也没有公开图库。
 
+它不是又一个 Immich：没有人脸识别、没有 AI 检索、没有手机 App、也没有账号体系 —— 只有一个共享的家庭图库、让长辈不用注册就能上传的邀请链接，以及随时可撤销的只读链接。
+
+<p align="center">
+  <img src="./docs/screenshots/01-albums.png" alt="相册列表" width="820">
+</p>
+
 > 关键词 / Keywords: self-hosted photo album · family photo sharing · photo collection · S3 · Garage · MinIO · Go · SQLite · React
+
+## 目录
+
+- [为什么用它](#为什么用它)
+- [和同类项目的区别](#和同类项目的区别)
+- [界面截图](#界面截图)
+- [快速开始](#快速开始)
+- [配置](#配置)
+- [对象存储要求](#对象存储要求)
+- [架构](#架构)
+- [开发与测试](#开发与测试)
+- [当前边界](#当前边界)
+- [参与贡献与安全问题](#参与贡献与安全问题)
+- [许可](#许可)
 
 ## 为什么用它
 
@@ -23,13 +44,45 @@
 | **轻量部署** | 单个容器镜像 = 前端 + API，一个数据卷即可运行 |
 | **无需账号体系** | 家庭口令与管理口令分离，会话以哈希形式存储 |
 
+## 和同类项目的区别
+
+大致按当前使用人数排序，不是排名 —— 合适的工具取决于家里真正缺什么。
+
+| | Family Gallery | Immich | PhotoPrism | Ente Photos |
+| --- | --- | --- | --- | --- |
+| 主要定位 | 一个共享的家庭图库 | 完整的照片平台 | AI 索引图库 | 端到端加密云 |
+| 数据库 | SQLite 单文件 | PostgreSQL + Redis | SQLite 或 MySQL | Postgres + Redis |
+| 媒体存储 | 任意 S3 兼容 Bucket（必需） | 本地文件系统 | 本地文件系统 | 本地或 S3 |
+| 手机后台备份 | 无 | 有 | 无 | 有 |
+| 人脸 / 物体识别 | 无 | 有 | 有 | 无 |
+| 端到端加密 | 无 | 无 | 无 | 有 |
+| 访客免注册上传 | 有，邀请链接限定范围 | 分享链接 | 无 | 无 |
+| 单张照片的上传者标记 | 有，随照片存储 | 依赖用户账户 | 依赖用户账户 | 依赖用户账户 |
+| 运行时占用 | 一个小容器 | 多容器，worker 较重 | 中等 | 多容器 |
+
+什么时候选它：家里人不多、NAS 上已经有 S3 Bucket、真正的难点是**让长辈把照片交出来**，而不是整理几万张文件。
+想要替代 Google Photos（手机备份 + ML 检索）选 Immich；把端到端加密放在第一位选 Ente。
+
+## 界面截图
+
+| | |
+| --- | --- |
+| ![照片网格](./docs/screenshots/02-photos.png)<br>**照片网格** —— 每张照片都标着上传者 | ![查看器](./docs/screenshots/03-viewer.png)<br>**查看器** —— 短效原图链接与照片信息 |
+| ![邀请页](./docs/screenshots/05-invite.png)<br>**邀请页** —— 访客无需账号即可上传 | ![登录页](./docs/screenshots/06-login.png)<br>**登录页** —— 一条共享口令，加上你的名字 |
+
 ## 快速开始
+
+先拉取已发布的镜像，或者从源码构建 —— 两种情况都需要先准备好 Bucket 和两个口令。
+
+```bash
+docker pull ghcr.io/rainsunme/family-gallery:latest
+```
 
 ```bash
 git clone https://github.com/RainSunMe/family-gallery.git
 cd family-gallery
 cp .env.example .env      # 填写所有 REPLACE_WITH_* 值
-docker compose up -d --build
+docker compose up -d      # 加 --build 则改为从源码编译
 ```
 
 打开 `http://localhost:8080` 并使用 `.env` 中配置的家庭口令登录。
@@ -38,6 +91,14 @@ docker compose up -d --build
 > 生产环境请放在 HTTPS 反向代理之后，只暴露应用端口。
 
 ### 不用 Compose
+
+```bash
+docker run -d --name gallery --env-file .env \
+  -p 127.0.0.1:8080:8080 -v gallery-data:/app/data \
+  ghcr.io/rainsunme/family-gallery:latest
+```
+
+也可以自己构建镜像：
 
 ```bash
 docker build -t family-gallery .
@@ -178,6 +239,14 @@ docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
 - 打包任务运行在 API 进程内，单 worker 循环；大规模使用时可拆分为独立 worker 并加入持久租约。
 - SQLite 与对象存储都需要自行备份，并定期演练恢复。
 
+## 参与贡献与安全问题
+
+欢迎提 issue 和范围集中的 PR，本地开发流程与代码约定见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+**请勿**在公开 issue 中报告安全问题，改用 [安全策略](./SECURITY.md)；其中也记录了威胁模型与运维加固清单。
+
 ## 许可
 
 [MIT](./LICENSE)。`web/public/fonts` 中的 Inter 与 Noto Sans SC 以 SIL Open Font License 分发，许可证随字体一同提供。
+
+登录页背景图是 Unsplash 照片，按 Unsplash License 使用，来源记录在 `web/public/media/CREDITS.md`。

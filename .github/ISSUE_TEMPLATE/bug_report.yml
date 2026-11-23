@@ -1,0 +1,67 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please redact your domain, bucket name, credentials
+        and any personal photos before pasting logs or screenshots.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Opened /albums
+        2. Clicked "Add photos" and picked 3 JPEGs
+        3. Upload stopped at the third file with "S3 upload failed (403)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Container logs (`docker logs family-gallery`) and any browser console errors.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version or image tag
+      placeholder: v0.1.0, or the output of `docker inspect` image digest
+    validations:
+      required: true
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Object storage
+      options:
+        - Garage
+        - MinIO
+        - AWS S3
+        - SeaweedFS
+        - Ceph RGW
+        - Other / not sure
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Safari 18 on iOS 18.2
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+      options:
+        - docker compose from this repo
+        - plain docker run
+        - built the binary myself
+        - other
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed credentials, domains and personal photos from this report
+          required: true
+        - label: I searched existing issues for the same problem
+          required: true
