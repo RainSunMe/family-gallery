@@ -5,7 +5,7 @@
 # Run:   docker run --env-file .env -p 8080:8080 -v family-gallery-data:/app/data family-gallery:latest
 # ---------------------------------------------------------------------------
 
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /src
 ENV CI=true
 RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
