@@ -78,6 +78,16 @@ button,a,input,select,textarea{outline-offset:3px}
 .btn-secondary:hover{background:var(--color-soft)}
 .btn-danger{background:#a25142;color:#fff;border-color:#a25142}
 .btn-danger:hover{background:#8f4537;border-color:#8f4537}
+/* Status pill. Lives here rather than in one page's <style> block: the same pill
+   is rendered from the collection card and the shares page, and a page-local
+   rule meant it rendered unstyled wherever that page was not mounted. */
+.status{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:5px;background:var(--color-accent-soft);color:var(--color-accent);font-size:10px;line-height:1.5;white-space:nowrap}
+.status>i{width:5px;height:5px;border-radius:50%;background:currentColor}
+/* An ended collection is secondary information sitting on top of a photo. A
+   translucent dark pill blends with the image; a solid white one reads as a
+   pasted-on block. Same treatment as the photo-count pill on album covers. */
+.status.is-ended{background:#172b32b8;color:#fff;border:1px solid #ffffff2e;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.status.is-ended>i{background:#ffffffa1}
 .btn-quiet{background:transparent;color:var(--color-secondary);padding:9px}
 .btn-quiet:hover{background:var(--color-soft);color:var(--color-ink)}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;padding:0;border:0;border-radius:11px;background:transparent;color:var(--color-secondary);flex-shrink:0;transition:background .18s,color .18s,transform .18s}
