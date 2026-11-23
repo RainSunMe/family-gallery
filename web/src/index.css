@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/* fonts are locally bundled under OFL; see web/public/fonts */
+@font-face{font-family:Inter;src:url('/fonts/Inter-Variable.ttf') format('truetype');font-weight:100 900;font-display:swap}
+/* fonts are locally bundled under OFL; see web/public/fonts */
+@font-face{font-family:'Noto Sans SC';src:url('/fonts/NotoSansSC-Variable.ttf') format('truetype');font-weight:100 900;font-display:swap}
+/* Display serif used only for the wordmark; variable axes SOFT/WONK/opsz/wght. */
+@font-face{font-family:Fraunces;src:url('/fonts/Fraunces-Variable.ttf') format('truetype');font-weight:100 900;font-display:swap}
+
+@theme {
+  --font-sans: Inter,'Noto Sans SC',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-brand: Fraunces,Georgia,'Times New Roman',serif;
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-sidebar: #fafafa;
+  --color-ink: #0a0a0a;
+  --color-secondary: #52525b;
+  --color-muted: #71717a;
+  --color-line: #e4e4e7;
+  --color-soft: #f4f4f5;
+  --color-accent: #18181b;
+  --color-accent-soft: #f4f4f5;
+  --radius-card: 14px;
+}
+
+:root{font-family:var(--font-sans);color:#0a0a0a;background:#fff;font-size:14px;font-synthesis:none;-webkit-font-smoothing:antialiased;color-scheme:light;--text-caption:12px;--text-secondary:13px;--text-body:14px;--text-title:34px;--text-dialog:24px;--page-x:42px;--page-top:38px;--icon-btn-size:42px;--icon-btn-ink:22px;--icon-btn-stroke:1.75;--icon-btn-gap:0px;--icon-btn-shift:calc((var(--icon-btn-size) - var(--icon-btn-ink)) / 2)}
+:root.dark{--color-canvas:#0a0a0a;--color-surface:#0a0a0a;--color-sidebar:#111113;--color-ink:#fafafa;--color-secondary:#a1a1aa;--color-muted:#a1a1aa;--color-line:#27272a;--color-soft:#18181b;--color-accent:#fafafa;--color-accent-soft:#1c1c1f;color:#fafafa;background:#0a0a0a;color-scheme:dark}
+/* Single source of truth for the page gutter: content, top bar and dock all use it. */
+@media(max-width:1150px) and (min-width:701px){:root{--page-x:29px}}
+@media(max-width:700px){:root{--page-x:20px}}
+/* Desktop has no flow spacer: the absolute top bar floats above the content, so
+   the page has to clear it by itself (bar sits at 24px + 48px high). */
+@media(min-width:1024px){:root{--page-top:84px;--topbar-top:24px}}
+*{box-sizing:border-box;scrollbar-width:none}
+*::-webkit-scrollbar{width:0;height:0;display:none}
+html,body{scrollbar-width:none;-ms-overflow-style:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:0;height:0;display:none}
+body{margin:0;min-width:320px;padding-right:env(safe-area-inset-right);padding-left:env(safe-area-inset-left)}
+html{overflow-x:clip}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:disabled{cursor:not-allowed;opacity:.45}
+button,a,input,select,textarea{outline-offset:3px}
+:focus-visible{outline:2px solid var(--color-ink)}
+.field:focus,.field:focus-visible,.field:active{outline:none;box-shadow:none;border-color:var(--color-line)}
+[hidden]{display:none!important}
+::selection{background:#d4d4d8;color:#0a0a0a}
+.glass{background:color-mix(in srgb,var(--color-surface) 72%,transparent);backdrop-filter:blur(28px) saturate(160%);-webkit-backdrop-filter:blur(28px) saturate(160%)}
+/* Login hero: one photograph as backdrop, darkened by a semi-transparent scrim
+   so the copy keeps AA contrast in both light and dark themes.
+   Photo: Unsplash (photo-1511895426328-dc8714191300), Unsplash License —
+   bundled locally at web/public/media/login-hero.webp so no third-party
+   request is made at runtime. */
+.login-hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 64%;z-index:0}
+.login-hero-scrim{position:absolute;inset:0;z-index:0;background:
+  radial-gradient(120% 78% at 0% 58%,#0a0a0ad9 0%,#0a0a0a8c 46%,#0a0a0a33 72%,transparent 100%),
+  linear-gradient(180deg,#0a0a0ac2 0%,#0a0a0a80 38%,#0a0a0a99 72%,#0a0a0adb 100%)}
+.icon{width:18px;height:18px;stroke-width:1.65;flex-shrink:0}
+/* ---------------------------------------------------------------------------
+   IconButton primitive — the only place that decides icon-button geometry.
+   Box: fixed hit target, glyph always optically centred, one stroke weight.
+   Edge alignment: pull the whole GROUP by --icon-btn-shift, never nudge the
+   glyph inside its box (that is what made the top bar drift out of alignment).
+   --------------------------------------------------------------------------- */
+.icon-btn{width:var(--icon-btn-size);height:var(--icon-btn-size);display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0;border:0;border-radius:11px;background:transparent;color:var(--color-ink);-webkit-tap-highlight-color:transparent;transition:opacity .18s ease,background .18s ease}
+.icon-btn>.icon{width:var(--icon-btn-ink);height:var(--icon-btn-ink);stroke-width:var(--icon-btn-stroke)}
+.icon-btn:hover{opacity:.6}
+.icon-btn:active{opacity:.5;transform:none}
+.page{max-width:1580px;margin:0 auto;padding:var(--page-top) var(--page-x) 60px;animation:page-in .25s ease}
+.page-title{font-size:var(--text-title);line-height:1.3;font-weight:650;letter-spacing:-1.1px;margin:0}
+.page-description{color:var(--color-secondary);font-size:var(--text-body);line-height:1.8;margin-top:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 16px;border:1px solid transparent;border-radius:9px;font-size:var(--text-secondary);font-weight:500;line-height:1.4;white-space:nowrap;transition:background .18s,border-color .18s,transform .18s}
+.btn:active{transform:scale(.975)}
+.btn-primary{background:var(--color-accent);color:var(--color-canvas);box-shadow:none}
+.btn-primary:hover{filter:none;background:color-mix(in srgb,var(--color-accent) 88%,var(--color-muted))}
+.btn-secondary{background:var(--color-surface);border-color:var(--color-line);color:var(--color-ink)}
+.btn-secondary:hover{background:var(--color-soft)}
+.btn-quiet{background:transparent;color:var(--color-secondary);padding:9px}
+.btn-quiet:hover{background:var(--color-soft);color:var(--color-ink)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;padding:0;border:0;border-radius:11px;background:transparent;color:var(--color-secondary);flex-shrink:0;transition:background .18s,color .18s,transform .18s}
+.icon-btn .icon{width:22px;height:22px}
+.icon-btn:hover{background:transparent;color:var(--color-accent)}
+.icon-btn:active{transform:scale(.92)}
+.field{display:block;width:100%;min-height:44px;border:1px solid var(--color-line);border-radius:10px;background:var(--color-canvas);color:var(--color-ink);padding:11px 13px;font-size:var(--text-body);line-height:1.7}
+.field::placeholder{color:var(--color-muted);font-size:var(--text-secondary)}
+select.field{appearance:none;-webkit-appearance:none;padding-right:42px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23667c81' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+select.field:hover{border-color:var(--color-secondary)}
+select.field option{background:var(--color-surface);color:var(--color-ink);padding:12px}
+.dark select.field{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%239ca5b1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")}
+.field-leading{position:relative}
+.field-leading .field{padding-left:44px!important}
+.field-leading>.icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none}
+.field-label{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:var(--text-secondary);font-weight:500;color:var(--color-secondary);margin:18px 0 8px}
+.field-label>span{font-size:var(--text-caption);color:var(--color-muted);font-weight:400}
+.panel{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-card)}
+.dialog{padding:0;margin:auto;border:1px solid color-mix(in srgb,var(--color-surface) 65%,transparent);border-radius:20px;background:var(--color-surface);color:var(--color-ink);width:460px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 48px);box-shadow:0 28px 90px #102a3240;overflow:auto;overscroll-behavior:contain}
+.dialog::backdrop{background:#10141a80;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.dialog[open]{animation:dialog-in .24s ease}
+.dialog-panel{padding:28px}
+.dialog-title{font-size:var(--text-dialog);font-weight:600;line-height:1.5;letter-spacing:-.5px;margin:0}
+.dialog-description{font-size:var(--text-secondary);color:var(--color-muted);line-height:1.85;margin-top:6px}
+.dialog-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:24px}
+.dialog-close{width:44px;height:44px;margin:-6px -6px 0 0;border-radius:50%;outline:none}
+.dialog-grip{display:none}
+@media(max-width:700px){.dialog-close{display:none!important}}
+.dialog-close:focus-visible{outline:none;background:transparent;color:var(--color-accent)}
+.dialog-close .icon{width:25px;height:25px;stroke-width:1.8}
+.note{display:flex;align-items:flex-start;gap:8px;padding:12px 13px;border-radius:9px;background:var(--color-soft);color:var(--color-muted);font-size:var(--text-caption);line-height:1.9;margin-top:18px}
+.note .icon{width:14px;height:14px;margin-top:3px;color:var(--color-accent)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:240px;padding:40px 22px;border:1px dashed var(--color-line);border-radius:14px;color:var(--color-muted)}
+.empty h3{color:var(--color-ink);font-size:16px;font-weight:500;margin:16px 0 8px}
+.empty p{font-size:12px;line-height:1.9}
+.skeleton{background:linear-gradient(100deg,var(--color-soft) 35%,color-mix(in srgb,var(--color-surface) 70%,var(--color-soft)) 50%,var(--color-soft) 65%);background-size:300% 100%;animation:skeleton 1.3s ease infinite}
+.photo-grid{display:grid;place-items:stretch;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;gap:6px}
+.photo-tile{position:relative;display:block;aspect-ratio:1/1;width:100%;height:auto;border-radius:5px;overflow:hidden;background:var(--color-soft);padding:0;border:0;min-width:0}
+.photo-tile>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;transition:filter .2s}
+.photo-tile>span.photo-fallback{position:absolute;inset:0;display:grid;place-items:center;background:var(--color-soft);color:var(--color-muted)}
+.photo-tile:hover>img{filter:brightness(.92)}
+.selecting .photo-tile:hover>img{filter:none}
+.photo-check{position:absolute;top:50%;left:50%;z-index:3;display:none;place-items:center;width:34px;height:34px;margin:-17px 0 0 -17px;border:1.5px solid #ffffffd9;border-radius:50%;color:#fff;background:#0a0a0a66;backdrop-filter:blur(4px)}
+.photo-check svg{width:19px;height:19px;stroke-width:2.6}
+.photo-select-mask{position:absolute;inset:0;z-index:2;display:none;background:#0a0a0a4d}
+.selecting .photo-check{display:grid}
+.selecting .photo-tile:not(.selected) .photo-check{border-color:#ffffff8c;background:#ffffff26;color:transparent}
+.selecting .photo-tile:not(.selected) .photo-select-mask{display:block;background:#0a0a0a26}
+.photo-tile.selected .photo-select-mask{display:block}
+.photo-origin{position:absolute;right:7px;bottom:7px;z-index:2;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;background:#0a0a0a99;backdrop-filter:blur(6px)}
+.photo-origin .icon{width:11px;height:11px;stroke-width:2.8}
+.photo-origin .dot{width:7px;height:7px;border-radius:50%;background:#fff}
+.photo-origin.is-pending{background:#ffffffb3;color:#0a0a0a;box-shadow:0 0 0 1px #0a0a0a1a}
+.photo-contributor{position:absolute;left:6px;bottom:6px;z-index:2;max-width:calc(100% - 40px);padding:2px 7px;border-radius:999px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#0a0a0a8c;color:#fff;font-size:10px;line-height:1.6;backdrop-filter:blur(6px);pointer-events:none}
+.selecting .photo-contributor{display:none}
+.photo-context-meta{margin:2px 4px 6px;padding:0 8px 8px;border-bottom:1px solid var(--color-line);color:var(--color-muted);font-size:var(--text-caption);line-height:1.6}
+.toast{position:fixed;left:calc(50% + 116px);bottom:28px;transform:translateX(-50%);z-index:100;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);padding:13px 18px;border:1px solid var(--color-line);border-radius:11px;box-shadow:0 8px 30px #0a0a0a12;color:var(--color-ink);font-size:12px;line-height:1.8;animation:toast-in .25s ease}
+.toast .icon{color:var(--color-ink);width:16px}
+/* Brand lockup geometry lives in one place. The `.brand-mark-lg` modifier is opt-in:
+   only the sign-in panel uses it, the sidebar keeps the compact default. Stroke scales
+   with the rendered size so the glyph keeps a constant optical weight (viewBox is 24). */
+.brand-mark{--brand-mark-size:34px;--brand-icon-size:28px;display:grid;place-items:center;width:var(--brand-mark-size);height:var(--brand-mark-size);flex-shrink:0;color:var(--color-ink);background:transparent;border-radius:0}
+.brand-icon{width:var(--brand-icon-size);height:var(--brand-icon-size);stroke-width:1.6}
+.brand-mark-lg{--brand-mark-size:48px;--brand-icon-size:42px}
+.brand-mark-lg .brand-icon{stroke-width:1.4}
+/* Wordmark: a warm editorial serif. Serifs need tighter tracking than the
+   previous all-caps grotesque, and the tagline stays in the UI sans.
+   Size is a variable so the sidebar can use a smaller lockup than the sign-in
+   panel without duplicating the typography rules. */
+.brand-word{--brand-word-size:23px;display:block;font-family:var(--font-brand);font-size:var(--brand-word-size);font-weight:600;letter-spacing:-.012em;line-height:1;font-optical-sizing:auto;font-variation-settings:'SOFT' 30,'WONK' 0;white-space:nowrap}
+.brand-tagline{display:block;font-family:var(--font-sans);font-size:8px;font-weight:500;letter-spacing:1.5px;color:var(--color-muted);margin-top:7px;white-space:nowrap;font-variation-settings:normal}
+/* The 232px sidebar gives the lockup 139px of text budget: 19px keeps
+   "Family Gallery" on one line with ~8px of slack instead of wrapping. */
+.sidebar .brand-word{--brand-word-size:19px}
+.photo-context{position:fixed;z-index:65;min-width:190px;padding:6px;border:1px solid var(--color-line);border-radius:12px;background:var(--color-surface);box-shadow:0 10px 32px #0a0a0a14;animation:context-in .14s ease}
+.photo-context button{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:9px 12px;border-radius:7px;text-align:left;font-size:13px;color:var(--color-ink)}
+.photo-context button:hover{background:var(--color-soft)}
+.photo-context button:disabled{opacity:.45}
+.mobile-dock{display:none}
+@keyframes page-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes dialog-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes drawer-in{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes drawer-out{from{opacity:1;transform:translateY(0)}to{opacity:1;transform:translateY(100%)}}
+@keyframes skeleton{from{background-position:100% 0}to{background-position:-100% 0}}
+@keyframes context-in{from{opacity:0;transform:translateY(5px) scale(.97)}to{opacity:1;transform:none}}
+
+@media(min-width:1600px){.photo-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media(max-width:1150px) and (min-width:701px){.photo-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:900px) and (min-width:701px){.photo-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){
+ .page{padding:18px var(--page-x) 32px}
+ .page-title{font-size:30px;letter-spacing:-1px}
+ .page-description{font-size:12px;line-height:1.75}
+ .btn{font-size:12px;min-height:42px;padding:10px 12px}
+ .field{font-size:16px;min-height:46px}
+ .photo-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
+ .photo-tile{border-radius:3px}
+ .photo-check{width:30px;height:30px;margin:-15px 0 0 -15px}
+ .photo-check svg{width:18px;height:18px}
+ .photo-status{width:7px;height:7px;top:5px;right:5px}
+ .dialog{width:100%;max-width:100%;max-height:88dvh;margin:auto 0 0;border-radius:22px 22px 0 0;border-bottom:0}
+ .dialog[open]{animation:drawer-in .3s cubic-bezier(.22,.75,.24,1)}
+ .dialog.is-closing{animation:drawer-out .22s ease-in forwards}
+ .dialog-panel{padding:8px 24px calc(25px + env(safe-area-inset-bottom))}
+ .dialog-grip{display:block;padding:10px 0 16px;margin:0 -24px;cursor:grab;touch-action:none;-webkit-tap-highlight-color:transparent}
+ .dialog-grip:active{cursor:grabbing}
+ .dialog-grip:focus-visible{outline:none}
+ .dialog-handle{display:block;width:36px;height:4px;margin:0 auto;border-radius:9px;background:var(--color-line)}
+ .dialog-grip:hover .dialog-handle{background:var(--color-muted)}
+ .dialog-actions .btn{min-height:44px}
+ .dialog-close{margin-top:-8px}
+ .toast{left:50%;bottom:96px;font-size:12px;min-width:220px;justify-content:center}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Typography: 12px captions, 13px secondary text, 14px body text. */
+[class~="text-[9px]"],[class~="text-[10px]"],[class~="text-[11px]"]{font-size:var(--text-caption);line-height:1.55}
+[class~="text-[12px]"],.text-xs{font-size:var(--text-secondary)}
+[class~="text-[13px]"]{font-size:var(--text-body)}
+@media(max-width:700px){:root{--text-title:30px;--text-dialog:22px}.page-title{font-size:var(--text-title)}.page-description{font-size:var(--text-secondary)}.btn{font-size:var(--text-secondary)}}

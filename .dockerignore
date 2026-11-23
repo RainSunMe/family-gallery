@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data/
+tmp/
+coverage/
+node_modules/
+web/node_modules/
+web/dist/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.tsbuildinfo

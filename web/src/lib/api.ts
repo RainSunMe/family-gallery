@@ -1,0 +1,77 @@
+import { currentLocale, translate } from './i18n';
+
+export type Role = 'family' | 'admin';
+export type Album = {
+  id: string; name: string; description: string; cover_url: string; cover_photo_id: string;
+  photo_count: number; shared: boolean; created_at: string; updated_at: string;
+  taken_from: string; taken_to: string;
+};
+export type Photo = {
+  id: string; album_id: string; name: string; mime: string; size: number;
+  width: number; height: number; taken_at: string; contributor?: string; status?: string;
+};
+export type PhotoPage = { items: Photo[]; urls: Record<string, string>; next_cursor: string };
+export type Contributor = { name: string; count: number };
+export type CollectionPhoto = Photo & { url: string; contributor: string; created_at: string; message: string; status: 'pending' | 'imported' };
+export type Collection = {
+  id: string; name: string; description: string; album_id: string; status: 'active' | 'ended';
+  expires_at: string; batch_limit: number; allow_message: boolean; created_at: string;
+  photo_count: number; pending_count: number; imported_count: number;
+  contributors: Contributor[]; photos: CollectionPhoto[]; invite_url: string;
+};
+export type Share = { id: string; album_id: string; album_name: string; album_cover_url: string; photo_count: number; expires_at: string; created_at: string; view_count: number; url: string };
+export type DownloadPackage = { id: string; part: number; size: string; file_count: number };
+export type DownloadJob = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; progress: number; error: string; packages: DownloadPackage[]; expires_at: string };
+export type UploadGrant = { id: string; key: string; url: string; thumb_url: string; preview_url: string; multipart_upload_id: string; part_size: number };
+
+export class ApiError extends Error {
+  constructor(public status: number, public code: string, message: string) { super(message); }
+}
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const separator = path.includes('?') ? '&' : '?';
+  const url = `/api/v1${path}${separator}lang=${currentLocale()}`;
+  const response = await fetch(url, {
+    ...options,
+    credentials: 'same-origin',
+    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
+  });
+  if (!response.ok) {
+    let message = translate(currentLocale(), 'api.requestFailed'); let code = 'REQUEST_FAILED';
+    try { const data = await response.json(); message = data.error?.message || message; code = data.error?.code || code; } catch { /* non-json error */ }
+    throw new ApiError(response.status, code, message);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json();
+}
+
+export const listAlbums = () => api<{ items: Album[] }>('/albums');
+export const getAlbum = (id: string) => api<Album>(`/albums/${id}`);
+export const listPhotos = (albumId = '', type = 'all') => api<PhotoPage>(`${albumId ? `/albums/${albumId}/photos` : '/photos'}${type !== 'all' ? `?type=${type}` : ''}`);
+export const listCollections = () => api<{ items: Collection[] }>('/collections');
+export const getCollection = (id: string) => api<Collection>(`/collections/${id}`);
+export const listShares = () => api<{ items: Share[] }>('/shares');
+export const createAlbum = (input: { name: string; description: string }) => api<Album>('/albums', { method: 'POST', body: JSON.stringify(input) });
+export const setAlbumCover = (albumID: string, photoID: string) => api<Album>(`/albums/${albumID}/cover`, { method: 'PUT', body: JSON.stringify({ photo_id: photoID }) });
+export const createCollection = (input: { name: string; description: string; album_id: string; expiry_days: number; batch_limit: number; allow_message: boolean }) => api<{ id: string; url: string }>('/collections', { method: 'POST', body: JSON.stringify(input) });
+export const createShare = (input: { album_id: string; expiry_days: number }) => api<{ id: string; url: string }>('/shares', { method: 'POST', body: JSON.stringify(input) });
+export const revokeShare = (id: string) => api<void>(`/shares/${id}`, { method: 'DELETE' });
+export const closeCollection = (id: string) => api<{ status: string }>(`/collections/${id}/close`, { method: 'POST', body: '{}' });
+export const importCollection = (id: string, itemIDs: string[] = []) => api<{ imported: number; failed: number }>(`/collections/${id}/imports`, { method: 'POST', body: JSON.stringify({ item_ids: itemIDs }) });
+export const createDownload = (input: { album_id: string; photo_ids: string[]; mode: 'single' | 'batch' }, guestToken = '') => api<{ id: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads`, { method: 'POST', body: JSON.stringify(input) });
+export const getDownload = (id: string, guestToken = '') => api<DownloadJob>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}`);
+export const signDownload = (id: string, packageID: string, guestToken = '') => api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}/sign`, { method: 'POST', body: JSON.stringify({ package_id: packageID }) });
+export const guestAlbum = (token: string) => api<Album>(`/guest/shares/${token}/album`);
+export const guestPhotos = (token: string, albumID: string) => api<PhotoPage>(`/guest/shares/${token}/photos?album_id=${albumID}`);
+export const guestCollection = () => api<{ id: string; name: string; description: string; expires_at: string; batch_limit: number; allow_message: boolean; display_name: string }>('/guest/collections/current');
+export const guestSession = (token: string, displayName: string) => api<{ display_name: string }>(`/guest/collections/${token}/session`, { method: 'POST', body: JSON.stringify({ display_name: displayName }) });
+export const guestSubmissions = () => api<{ items: { id: string; name: string; url: string; status: string; created_at: string }[] }>('/guest/collections/submissions');
+export const signPhoto = (id: string, variant = 'original', guestToken = '', download = false) => guestToken.startsWith('collection:')
+  ? api<{ url: string }>(`/collections/${guestToken.slice(11)}/sign-read`, { method: 'POST', body: JSON.stringify({ item_id: id, variant }) })
+  : api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/media/sign-read`, { method: 'POST', body: JSON.stringify({ photo_id: id, variant, download }) });
+
+export async function copyText(text: string) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const field = document.createElement('textarea'); field.value = text; document.body.appendChild(field); field.select(); document.execCommand('copy'); field.remove(); }
+}
+export const formatDate = (value: string) => value ? new Intl.DateTimeFormat(currentLocale() === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(value)) : '';
+export const formatSize = (bytes: number) => bytes >= 1 << 20 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;

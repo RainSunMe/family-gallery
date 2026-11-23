@@ -1,0 +1,23 @@
+# Build artifacts and local state
+node_modules/
+dist/
+.pnpm-store/
+data/
+tmp/
+coverage/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.tsbuildinfo
+
+# Local secrets
+.env
+.env.local
+*.env
+!.env.example
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,183 @@
+# Family Gallery · 自托管家庭共享相册
+
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
+[![License](https://img.shields.io/badge/License-MIT-black.svg)](./LICENSE)
+
+> 这是 [README.md](./README.md) 的中文版本。界面为完整双语（简体中文 / English），`DEFAULT_LANGUAGE` 决定首次打开时的语言；登录后可在设置页切换，`?lang=zh` / `?lang=en` 可临时覆盖。
+
+一个**自托管的家庭共享相册**，面向家人之间的照片收集、整理与只读分享。
+照片直传你自己拥有的私有 S3，应用只负责身份、权限、元数据与签名。没有第三方账号，也没有公开图库。
+
+> 关键词 / Keywords: self-hosted photo album · family photo sharing · photo collection · S3 · Garage · MinIO · Go · SQLite · React
+
+## 为什么用它
+
+| | |
+| --- | --- |
+| **私有存储** | 照片放在你自己的 Bucket，浏览器直传直读，应用不中转字节 |
+| **照片收集** | 一条邀请链接，亲友无需注册即可上传，只能看到自己的提交 |
+| **只读分享** | 可设有效期、可随时撤销的相册链接与二维码 |
+| **云端打包** | 服务端生成有界 ZIP、可分卷下载，过期自动清理 |
+| **轻量部署** | 单个容器镜像 = 前端 + API，一个数据卷即可运行 |
+| **无需账号体系** | 家庭口令与管理口令分离，会话以哈希形式存储 |
+
+## 快速开始
+
+```bash
+git clone https://github.com/RainSunMe/family-gallery.git
+cd family-gallery
+cp .env.example .env      # 填写所有 REPLACE_WITH_* 值
+docker compose up -d --build
+```
+
+打开 `http://localhost:8080` 并使用 `.env` 中配置的家庭口令登录。
+
+> 镜像内已经包含构建好的前端，**不要**挂载 `web/dist`，否则会覆盖镜像内容。
+> 生产环境请放在 HTTPS 反向代理之后，只暴露应用端口。
+
+### 不用 Compose
+
+```bash
+docker build -t family-gallery .
+docker run -d --name gallery --env-file .env \
+  -p 127.0.0.1:8080:8080 -v gallery-data:/app/data \
+  family-gallery
+```
+
+## 配置
+
+全部配置通过环境变量提供。`APP_ENV` 默认就是 `production`，会强制校验口令强度与 HTTPS。
+
+### 必填
+
+| 变量 | 说明 |
+| --- | --- |
+| `FAMILY_PASSWORD` | 家庭共享口令，不能是 `family` |
+| `ADMIN_PASSWORD` | 管理口令，必须与家庭口令不同，不能是 `admin` |
+| `SESSION_SECRET` | 至少 32 字符的随机会话密钥 |
+| `S3_ENDPOINT` | 后端访问对象存储的地址 |
+| `S3_BUCKET` | 私有 Bucket 名称 |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | 应用专用 S3 凭据 |
+
+### 品牌与外观
+
+界面上展示的名称、副标题和描述都可以改，无需重新构建前端：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SITE_NAME` | `Family Gallery` | 侧栏、登录页、设置页显示的名称 |
+| `SITE_TAGLINE` | `PRIVATE FAMILY PHOTOS` | 名称下方的小号英文副标题 |
+| `SITE_DESCRIPTION` | `自托管的家庭共享相册` | 设置页底部的描述 |
+
+例如想叫「橙光」，只需在 `.env` 中写：
+
+```dotenv
+SITE_NAME=橙光
+SITE_TAGLINE=TUANGGUANG FAMILY PHOTOS
+SITE_DESCRIPTION=家庭相册
+```
+
+### 界面语言
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DEFAULT_LANGUAGE` | `en` | 界面默认语言，可选 `en`、`zh` |
+
+登录页直接使用 `DEFAULT_LANGUAGE`，因此入口没有语言切换按钮；登录后可在设置页切换语言，选择会记在当前浏览器里。`?lang=zh` / `?lang=en` 可临时覆盖。接口错误信息同理：`lang` 参数优先，其次 `Accept-Language`，最后 `DEFAULT_LANGUAGE`。
+
+### 运行与访问
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `APP_ENV` | `production` | 设为 `development` 关闭生产校验 |
+| `APP_ADDR` | `:8080` | 监听地址 |
+| `APP_PUBLIC_URL` | `http://localhost:8080` | 对外访问地址，生产必须 HTTPS |
+| `DATABASE_PATH` | `./data/gallery.db` | SQLite 路径，镜像内为 `/app/data/gallery.db` |
+| `S3_PUBLIC_ENDPOINT` | 回退到 `S3_ENDPOINT` | 浏览器可访问的 S3 地址，生产必须 HTTPS |
+| `S3_REGION` | `garage` | 与对象存储配置一致 |
+| `S3_USE_PATH_STYLE` | `true` | 多数自托管 S3 需要开启 |
+| `APP_ENV_FILE` | 空 | 可选的补充环境变量文件 |
+
+### 会话与签名
+
+| 变量 | 默认值 |
+| --- | --- |
+| `FAMILY_SESSION_TTL` | `720h` |
+| `ADMIN_SESSION_TTL` | `12h` |
+| `SIGNED_READ_TTL` | `5m` |
+| `SIGNED_UPLOAD_TTL` | `15m` |
+| `COLLECTION_SESSION_TTL` | `168h` |
+
+### 上传、下载与限流
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MAX_UPLOAD_SIZE` | `209715200` | 单文件上限（字节，200 MiB） |
+| `MULTIPART_PART_SIZE` | `8388608` | 分片大小，S3 最小 5 MiB |
+| `DOWNLOAD_PART_SIZE` | `524288000` | ZIP 分卷上限（500 MiB） |
+| `DOWNLOAD_RETENTION` | `24h` | 下载包保留时间 |
+| `WORKER_INTERVAL` | `2s` | 打包任务轮询间隔 |
+| `LOGIN_MAX_ATTEMPTS` | `10` | 连续失败上限 |
+| `LOGIN_BLOCK_DURATION` | `5m` | 失败封禁时长 |
+
+## 对象存储要求
+
+任何兼容 S3 的服务都可以：**Garage、MinIO、SeaweedFS、Ceph RGW、AWS S3** 等。
+
+1. Bucket 必须**私有**，访问只能通过短效预签名链接。
+2. 允许浏览器跨域 `GET`、`PUT`、`HEAD`，并暴露 `ETag`（分片上传必需）。
+3. `S3_PUBLIC_ENDPOINT` 的主机必须与签名时使用的一致，不能用内网地址签名后替换公网域名。
+
+部署完成后，以管理员身份调用一次即可写入精确来源的 CORS 规则：
+
+```bash
+curl -X PUT https://photos.example.com/api/v1/storage/cors \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: https://photos.example.com' \
+  --cookie 'cg_session=<管理会话>' \
+  -d '{}'
+```
+
+## 架构
+
+```text
+浏览器 ── 登录 / 元数据 / 签名 ──> Go API ── SQLite（相册、收集、分享、任务）
+浏览器 ── 预签名 PUT / GET ──────> 私有 S3（原图 / 预览图 / 缩略图）
+Go 打包任务 ── GET / PUT ────────> 私有 S3（ZIP 分卷）
+```
+
+| 目录 | 职责 |
+| --- | --- |
+| `cmd/server` | 入口、配置加载、优雅退出 |
+| `internal/config` | 全部环境变量与生产校验 |
+| `internal/database` | SQLite 表结构与迁移 |
+| `internal/httpapi` | 路由、鉴权、相册、收集、分享、下载 |
+| `internal/storage` | 通用 S3 适配：预签名、分片、HEAD、Copy |
+| `web/` | React + Vite + Tailwind 前端，由 Go 直接托管 |
+
+## 开发与测试
+
+```bash
+# Go：格式化、静态检查、单元测试
+docker run --rm -v "$PWD":/src -w /src golang:1.25-alpine \
+  sh -c 'gofmt -w cmd internal && go vet ./... && go test ./...'
+
+# 前端：类型检查与生产构建
+docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
+  sh -c 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm build'
+```
+
+本地联调可以自行启动一个单节点 Garage（或任意 S3 兼容服务），把 `APP_ENV` 设为 `development` 并使用 HTTP 地址。
+
+## 当前边界
+
+- 浏览器端完整支持 JPG、PNG、WebP、GIF；HEIC/HEIF 与视频暂无预览或转码链路。
+- 删除与回收站 UI 尚未开放。
+- 打包任务运行在 API 进程内，单 worker 循环；大规模使用时可拆分为独立 worker 并加入持久租约。
+- SQLite 与对象存储都需要自行备份，并定期演练恢复。
+
+## 许可
+
+[MIT](./LICENSE)。`web/public/fonts` 中的 Inter 与 Noto Sans SC 以 SIL Open Font License 分发，许可证随字体一同提供。
