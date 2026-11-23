@@ -7,6 +7,7 @@ updates:
     groups:
       go-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: /web
@@ -15,13 +16,23 @@ updates:
     groups:
       web-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
 
+  # Base images stay on a supported line on purpose: a major toolchain bump needs
+  # its own migration, so it should be a deliberate change rather than a PR.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: golang
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: alpine
+        update-types: ["version-update:semver-major"]

@@ -6,12 +6,12 @@ import (
 	"io"
 	"time"
 
+	"github.com/RainSunMe/family-gallery/internal/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/RainSunMe/family-gallery/internal/config"
 )
 
 type Store struct {

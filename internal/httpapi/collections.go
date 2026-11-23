@@ -193,8 +193,8 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	type importItem struct {
 		id, name, key, preview, thumb, mime, contributor string
-		size                                              int64
-		width, height                                     int
+		size                                             int64
+		width, height                                    int
 	}
 	pendingItems := make([]importItem, 0)
 	for rows.Next() {
