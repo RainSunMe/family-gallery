@@ -92,8 +92,8 @@ func (a *API) getCollection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.collectionSummary(r, id, name, description, albumID, status, expires, limit, allow, created))
 }
 func (a *API) collectionSummary(r *http.Request, id, name, description, albumID, status string, expires sql.NullString, limit, allow int, created string) map[string]any {
-	var total, pending, imported int
-	_ = a.db.QueryRowContext(r.Context(), `SELECT COUNT(*),COALESCE(SUM(status='pending'),0),COALESCE(SUM(status='imported'),0) FROM submission_items WHERE collection_id=?`, id).Scan(&total, &pending, &imported)
+	var total, pending, imported, duplicates int
+	_ = a.db.QueryRowContext(r.Context(), `SELECT COUNT(*),COALESCE(SUM(status='pending'),0),COALESCE(SUM(status='imported'),0),COALESCE(SUM(status='duplicate'),0) FROM submission_items WHERE collection_id=?`, id).Scan(&total, &pending, &imported, &duplicates)
 	rows, _ := a.db.QueryContext(r.Context(), `SELECT contributor,COUNT(*) FROM submission_items WHERE collection_id=? GROUP BY contributor ORDER BY COUNT(*) DESC`, id)
 	contributors := make([]map[string]any, 0)
 	if rows != nil {
@@ -120,7 +120,7 @@ func (a *API) collectionSummary(r *http.Request, id, name, description, albumID,
 			photos = append(photos, map[string]any{"id": itemID, "name": name, "mime": mime, "size": size, "width": width, "height": height, "url": url, "contributor": contributor, "status": status, "created_at": created, "message": message})
 		}
 	}
-	return map[string]any{"id": id, "name": name, "description": description, "album_id": albumID, "status": status, "expires_at": expires.String, "batch_limit": limit, "allow_message": allow == 1, "created_at": created, "photo_count": total, "pending_count": pending, "imported_count": imported, "contributors": contributors, "photos": photos, "invite_url": a.cfg.PublicURL + "/guest/collect/" + id}
+	return map[string]any{"id": id, "name": name, "description": description, "album_id": albumID, "status": status, "expires_at": expires.String, "batch_limit": limit, "allow_message": allow == 1, "created_at": created, "photo_count": total, "pending_count": pending, "imported_count": imported, "duplicate_count": duplicates, "contributors": contributors, "photos": photos, "invite_url": a.cfg.PublicURL + "/guest/collect/" + id}
 }
 func (a *API) closeCollection(w http.ResponseWriter, r *http.Request) {
 	result, err := a.db.ExecContext(r.Context(), `UPDATE collections SET status='ended' WHERE id=?`, chi.URLParam(r, "collectionID"))
@@ -185,21 +185,21 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "COLLECTION_NOT_FOUND", T(r)("collection_not_found"))
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor FROM submission_items WHERE collection_id=? AND status='pending'`, collectionID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash FROM submission_items WHERE collection_id=? AND status='pending'`, collectionID)
 	if err != nil {
 		a.internal(w, err)
 		return
 	}
 	defer rows.Close()
 	type importItem struct {
-		id, name, key, preview, thumb, mime, contributor string
-		size                                             int64
-		width, height                                    int
+		id, name, key, preview, thumb, mime, contributor, hash string
+		size                                                   int64
+		width, height                                          int
 	}
 	pendingItems := make([]importItem, 0)
 	for rows.Next() {
 		var item importItem
-		if err := rows.Scan(&item.id, &item.name, &item.key, &item.preview, &item.thumb, &item.mime, &item.size, &item.width, &item.height, &item.contributor); err != nil {
+		if err := rows.Scan(&item.id, &item.name, &item.key, &item.preview, &item.thumb, &item.mime, &item.size, &item.width, &item.height, &item.contributor, &item.hash); err != nil {
 			a.internal(w, err)
 			return
 		}
@@ -210,12 +210,29 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 	for _, id := range input.ItemIDs {
 		wanted[id] = true
 	}
-	imported, failed := 0, 0
+	imported, failed, skipped := 0, 0, 0
 	for _, item := range pendingItems {
 		id, name, key, preview, thumb, mime := item.id, item.name, item.key, item.preview, item.thumb, item.mime
 		size, width, height := item.size, item.width, item.height
 		if len(wanted) > 0 && !wanted[id] {
 			continue
+		}
+		// Guests cannot be told about existing photos, so the duplicate check
+		// happens here. Check before copying anything to the album's keys.
+		if a.cfg.DedupEnabled && item.hash != "" {
+			found, err := findDuplicate(r.Context(), a.db, albumID, item.hash)
+			if err != nil {
+				a.internal(w, err)
+				return
+			}
+			if found != nil {
+				if _, err := a.db.ExecContext(r.Context(), `UPDATE submission_items SET status='duplicate',imported_at=? WHERE id=? AND status='pending'`, now(), id); err != nil {
+					a.internal(w, err)
+					return
+				}
+				skipped++
+				continue
+			}
 		}
 		photoID := newID()
 		dest := "photos/originals/" + photoID + "/original"
@@ -239,7 +256,7 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 			a.internal(w, err)
 			return
 		}
-		_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, name, dest, destPreview, destThumb, mime, size, width, height, item.contributor, timestamp, timestamp)
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, name, dest, destPreview, destThumb, mime, size, width, height, item.contributor, item.hash, dedupKeyFor(item.hash, false), timestamp, timestamp)
 		if err == nil {
 			_, err = tx.ExecContext(r.Context(), `UPDATE submission_items SET status='imported',photo_id=?,imported_at=? WHERE id=? AND status='pending'`, photoID, timestamp, id)
 		}
@@ -257,7 +274,7 @@ func (a *API) importCollection(w http.ResponseWriter, r *http.Request) {
 		}
 		imported++
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"imported": imported, "failed": failed})
+	writeJSON(w, http.StatusOK, map[string]int{"imported": imported, "failed": failed, "skipped_duplicates": skipped})
 }
 
 func (a *API) createShare(w http.ResponseWriter, r *http.Request) {

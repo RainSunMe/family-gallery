@@ -156,6 +156,11 @@ func (a *API) signDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) RunWorker(ctx context.Context) {
+	// Backfill runs once at startup and is opt-in: it reads every original back
+	// out of the bucket, so it must never surprise an operator.
+	if a.cfg.DedupBackfill {
+		go a.backfillHashes(ctx)
+	}
 	ticker := time.NewTicker(a.cfg.WorkerInterval)
 	defer ticker.Stop()
 	for {

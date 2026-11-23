@@ -85,6 +85,7 @@ func (a *API) Routes() http.Handler {
 		r.Get("/photos", a.listPhotos)
 		r.Post("/media/sign-read", a.signRead)
 		r.Post("/uploads", a.createUpload)
+		r.Post("/uploads/check", a.checkDuplicates)
 		r.Post("/uploads/{uploadID}/parts/sign", a.signUploadPart)
 		r.Post("/uploads/{uploadID}/complete", a.completeUpload)
 		r.Delete("/uploads/{uploadID}", a.abortUpload)

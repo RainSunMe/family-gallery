@@ -43,6 +43,33 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate upload contributor: %w", err)
 	}
+	// Dedup: content_hash is the SHA-256 of the original bytes. dedup_key carries
+	// the uniqueness so that content_hash stays a plain record. A NULL dedup_key
+	// means "the user explicitly asked to add this duplicate"; SQLite allows many
+	// NULLs in a UNIQUE index, so those rows never collide.
+	for _, statement := range []string{
+		`ALTER TABLE photos ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE photos ADD COLUMN dedup_key TEXT`,
+		`ALTER TABLE upload_sessions ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE upload_sessions ADD COLUMN allow_duplicate INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE submission_items ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate dedup column: %w", err)
+		}
+	}
+	// Soft-deleted rows drop out of the index, so a photo in the trash never
+	// blocks uploading the same bytes again.
+	for _, statement := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS photos_album_dedup ON photos(album_id, dedup_key) WHERE dedup_key IS NOT NULL AND deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS photos_content_hash ON photos(content_hash) WHERE content_hash <> ''`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate dedup index: %w", err)
+		}
+	}
 	return db, nil
 }
 

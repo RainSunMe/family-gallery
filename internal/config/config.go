@@ -44,6 +44,13 @@ type Config struct {
 	CollectionLinkTTL  time.Duration
 	LoginMaxAttempts   int
 	LoginBlockDuration time.Duration
+
+	// DedupEnabled gates the duplicate-photo check. When false the upload API
+	// ignores content_hash and behaves like before.
+	DedupEnabled bool
+	// DedupBackfill hashes existing photos on startup. Off by default: it reads
+	// every original back out of the bucket.
+	DedupBackfill bool
 }
 
 func Load() (Config, error) {
@@ -91,6 +98,8 @@ func Load() (Config, error) {
 		CollectionLinkTTL:  duration(get, "COLLECTION_SESSION_TTL", 7*24*time.Hour),
 		LoginMaxAttempts:   integer(get, "LOGIN_MAX_ATTEMPTS", 10),
 		LoginBlockDuration: duration(get, "LOGIN_BLOCK_DURATION", 5*time.Minute),
+		DedupEnabled:       boolean(get, "DEDUP_ENABLED", true),
+		DedupBackfill:      boolean(get, "DEDUP_BACKFILL", false),
 	}
 	if cfg.FamilyPassword == "" || cfg.AdminPassword == "" {
 		return Config{}, errors.New("FAMILY_PASSWORD and ADMIN_PASSWORD must be set")
@@ -141,6 +150,20 @@ func size(get func(string, string) string, key string, fallback int64) int64 {
 func integer(get func(string, string) string, key string, fallback int) int {
 	value, err := strconv.Atoi(get(key, ""))
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// boolean treats an unparsable or absent value as the fallback, so a typo in
+// .env never silently flips a safety-relevant switch.
+func boolean(get func(string, string) string, key string, fallback bool) bool {
+	raw := strings.TrimSpace(get(key, ""))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
 		return fallback
 	}
 	return value

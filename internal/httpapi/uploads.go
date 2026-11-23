@@ -19,6 +19,11 @@ type uploadRequest struct {
 	Height      int    `json:"height"`
 	Message     string `json:"message"`
 	Contributor string `json:"contributor"`
+	// ContentHash is the SHA-256 of the original bytes, computed in the browser.
+	// Empty means "skip the duplicate check", which keeps older clients working.
+	ContentHash string `json:"content_hash"`
+	// AllowDuplicate lets the user add a photo the album already contains.
+	AllowDuplicate bool `json:"allow_duplicate"`
 }
 
 // cleanContributor trims and caps the client-supplied uploader name. The name is
@@ -54,15 +59,37 @@ func (a *API) createUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILE", T(r)("invalid_file"))
 		return
 	}
+	hash, ok := validateContentHash(input.ContentHash)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_HASH", T(r)("invalid_hash"))
+		return
+	}
 	var exists int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM albums WHERE id=? AND deleted_at IS NULL`, input.AlbumID).Scan(&exists); err != nil || exists == 0 {
 		writeError(w, http.StatusNotFound, "ALBUM_NOT_FOUND", T(r)("target_album_missing"))
 		return
 	}
+	// Catch duplicates before any bytes move: the browser has already hashed
+	// the file, so rejecting here costs nothing.
+	if a.cfg.DedupEnabled && hash != "" && !input.AllowDuplicate {
+		found, err := findDuplicate(r.Context(), a.db, input.AlbumID, hash)
+		if err != nil {
+			a.internal(w, err)
+			return
+		}
+		if found != nil {
+			a.duplicateResponse(w, r, found)
+			return
+		}
+	}
 	id := newID()
 	key := "photos/originals/" + id + "/original"
 	p := principal(r)
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), now())
+	allow := 0
+	if input.AllowDuplicate {
+		allow = 1
+	}
+	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,content_hash,allow_duplicate,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), hash, allow, now())
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -141,7 +168,8 @@ func (a *API) completeFamilyUpload(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	var input uploadRequest
-	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,contributor FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Contributor); err != nil {
+	var allowDuplicate int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,contributor,content_hash,allow_duplicate FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Contributor, &input.ContentHash, &allowDuplicate); err != nil {
 		a.internal(w, err)
 		return
 	}
@@ -161,8 +189,21 @@ func (a *API) completeFamilyUpload(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.Contributor, timestamp, timestamp)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO photos(id,album_id,name,original_key,preview_key,thumb_key,mime,size,width,height,contributor,content_hash,dedup_key,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, photoID, albumID, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.Contributor, input.ContentHash, dedupKeyFor(input.ContentHash, allowDuplicate == 1), timestamp, timestamp)
 	if err != nil {
+		// A concurrent upload of the same bytes won the race between the
+		// pre-check and this insert. Report it as the same duplicate error so
+		// the client offers "add anyway" instead of a generic failure.
+		if isUniqueViolation(err) {
+			tx.Rollback()
+			_, _ = a.db.ExecContext(r.Context(), `UPDATE upload_sessions SET status='aborted' WHERE id=?`, id)
+			if found, findErr := findDuplicate(r.Context(), a.db, albumID, input.ContentHash); findErr == nil && found != nil {
+				a.duplicateResponse(w, r, found)
+				return
+			}
+			writeError(w, http.StatusConflict, "DUPLICATE_PHOTO", T(r)("duplicate_photo"))
+			return
+		}
 		a.internal(w, err)
 		return
 	}
@@ -268,6 +309,14 @@ func (a *API) createGuestUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_FILE", T(r)("invalid_file_limit"))
 		return
 	}
+	// Guests cannot see the family library, so blocking on a duplicate here
+	// would only confuse them. The hash is recorded and the check happens when
+	// the organizer imports the submission.
+	hash, ok := validateContentHash(input.ContentHash)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_HASH", T(r)("invalid_hash"))
+		return
+	}
 	var pending int
 	_ = a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM upload_sessions WHERE actor_hash=? AND status='pending'`, p.Hash).Scan(&pending)
 	if pending >= limit {
@@ -276,7 +325,7 @@ func (a *API) createGuestUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID()
 	key := "collections/" + p.ScopeID + "/originals/" + id + "/original"
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, "collection", p.ScopeID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, strings.TrimSpace(input.Message), now())
+	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,message,content_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "collection", p.ScopeID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, strings.TrimSpace(input.Message), hash, now())
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -306,7 +355,7 @@ func (a *API) completeGuestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input uploadRequest
-	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,message FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Message); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT name,mime,width,height,message,content_hash FROM upload_sessions WHERE id=?`, id).Scan(&input.Name, &input.Mime, &input.Width, &input.Height, &input.Message, &input.ContentHash); err != nil {
 		a.internal(w, err)
 		return
 	}
@@ -324,7 +373,7 @@ func (a *API) completeGuestUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO submission_items(id,collection_id,session_hash,contributor,message,name,original_key,preview_key,thumb_key,mime,size,width,height,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, collectionID, p.Hash, p.Name, input.Message, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, now()); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO submission_items(id,collection_id,session_hash,contributor,message,name,original_key,preview_key,thumb_key,mime,size,width,height,content_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, collectionID, p.Hash, p.Name, input.Message, input.Name, key, previewKey, thumbKey, input.Mime, size, input.Width, input.Height, input.ContentHash, now()); err != nil {
 		a.internal(w, err)
 		return
 	}
