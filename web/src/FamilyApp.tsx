@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { QueryClient } from '@tanstack/react-query';
 import { LoaderCircle, Plus, Search } from 'lucide-react';
 import { Shell } from './components/Shell';
-import { Dialog, Toast } from './components/ui';
+import { Dialog, ConfirmDialog, Toast } from './components/ui';
 import { HeaderTitleProvider } from './components/HeaderTitleContext';
 import { LoginPage, SettingsDialog } from './components/AuthSettings';
 import { InviteDialog, NewCollectionDialog, ShareDialog } from './components/SharingPages';
@@ -26,6 +26,10 @@ export function FamilyApp() {
   const [shareAlbum, setShareAlbum] = useState<Album | null>(null);
   const [invite, setInvite] = useState<Collection | null>(null);
   const [search, setSearch] = useState(false);
+  // Photos waiting for the confirmation step. Moving to the trash is reversible,
+  // but there is no per-user history, so it always asks first.
+  const [pendingTrash, setPendingTrash] = useState<string[] | null>(null);
+  const [trashing, setTrashing] = useState(false);
   const [toast, setToast] = useState<{ message: string; action?: { label: string; run: () => void } } | null>(null);
   const [dark, setDark] = useState(() => { try { return localStorage.getItem('cg-theme') === 'dark'; } catch { return false; } });
   const client = useQueryClient();
@@ -53,9 +57,11 @@ export function FamilyApp() {
   // accounts and no audit trail, so a wrong click would otherwise be final.
   const moveToTrash = useCallback(async (ids: string[]) => {
     if (!ids.length) return;
+    setTrashing(true);
     try {
       const result = await trashPhotos(ids);
       client.invalidateQueries(); refreshAlbums();
+      setPendingTrash(null);
       setToast({
         message: t('trash.moved', { count: result.trashed }),
         action: {
@@ -67,7 +73,9 @@ export function FamilyApp() {
         },
       });
     } catch (reason) { setToast({ message: reason instanceof Error ? reason.message : t('trash.moveFailed') }); }
+    finally { setTrashing(false); }
   }, [client, refreshAlbums, t]);
+  const requestTrash = useCallback((ids: string[]) => { if (ids.length) setPendingTrash(ids); }, []);
   useEffect(() => { api<{ role: Role }>('/auth/session').then(result => setRole(result.role)).catch(() => setRole(null)); }, []);
   useEffect(() => { if (role && role !== 'loading') refreshAlbums().catch(reason => setToast({ message: reason.message })); }, [role, refreshAlbums]);
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { localStorage.setItem('cg-theme', dark ? 'dark' : 'light'); } catch { /* storage optional */ } }, [dark]);
@@ -76,7 +84,7 @@ export function FamilyApp() {
   if (!role) return <LoginPage onLogin={value => { setRole(value); client.clear(); }} />;
   const initialAlbum = path.startsWith('/albums/') ? path.split('/').pop() || albums[0]?.id || '' : albums[0]?.id || '';
   return <HeaderTitleProvider><Shell role={role} albumCount={albums.length} onUpload={() => setUpload(true)} onNewAlbum={() => setNewAlbum(true)} onNewCollection={() => setNewCollection(true)} onSettings={() => setSettings(true)}>
-    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: moveToTrash, onDeleteAlbum: deleteWholeAlbum, onToast: notify }}>
+    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: requestTrash, onDeleteAlbum: deleteWholeAlbum, onToast: notify }}>
       <Outlet />
     </FamilyActionsContext.Provider>
     {newAlbum && <NewAlbumDialog onClose={() => setNewAlbum(false)} onCreated={async album => { await refreshAlbums(); setNewAlbum(false); navigate({ to: '/albums/$albumID', params: { albumID: album.id } }); }} />}
@@ -86,6 +94,16 @@ export function FamilyApp() {
     {shareAlbum && <ShareDialog album={shareAlbum} onClose={() => setShareAlbum(null)} onCreated={() => { client.invalidateQueries({ queryKey: ['albums'] }); setToast({ message: t('share.created') }); }} />}
     {settings && <SettingsDialog role={role} dark={dark} onTheme={() => setDark(value => !value)} onClose={() => setSettings(false)} onLogout={async () => { await api('/auth/logout', { method: 'POST', body: '{}' }); setRole(null); setSettings(false); }} />}
     {search && <SearchDialog onClose={() => setSearch(false)} />}
+    {pendingTrash && <ConfirmDialog
+      title={t('trash.confirmTitle')}
+      description={pendingTrash.length > 1 ? t('trash.confirmTextMany', { count: pendingTrash.length }) : t('trash.confirmText')}
+      confirmLabel={t('trash.confirmMove')}
+      cancelLabel={t('common.cancel')}
+      danger
+      busy={trashing}
+      onConfirm={() => moveToTrash(pendingTrash)}
+      onClose={() => { if (!trashing) setPendingTrash(null); }}
+    />}
     {toast && <Toast message={toast.message} action={toast.action} onClose={() => setToast(null)} />}
   </Shell></HeaderTitleProvider>;
 }

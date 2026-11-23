@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
-import { X, Info, CheckCircle2, Aperture } from 'lucide-react';
+import { X, Info, CheckCircle2, Aperture, LoaderCircle } from 'lucide-react';
 import { useSite } from '../lib/site';
 import { currentLocale, translate } from '../lib/i18n';
 
@@ -101,4 +101,23 @@ export function Empty({ icon, title, description, action }: { icon: ReactNode; t
 
 export function Loading({ rows = 3 }: { rows?: number }) {
   return <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-label={translate(currentLocale(), 'common.loading')}>{Array.from({ length: rows * 3 }, (_, i) => <div key={i} className="skeleton aspect-[1.4] rounded-xl" />)}</div>;
+}
+
+/**
+ * A second step before anything destructive. Uses the shared Dialog so focus
+ * trapping, Escape and the mobile drag-to-close behaviour all behave the same
+ * as every other panel in the app.
+ */
+export function ConfirmDialog({ title, description, confirmLabel, cancelLabel, danger = false, busy = false, onConfirm, onClose }: {
+  title: string; description?: string; confirmLabel: string; cancelLabel: string;
+  danger?: boolean; busy?: boolean; onConfirm: () => void; onClose: () => void;
+}) {
+  return <Dialog title={title} description={description} onClose={() => { if (!busy) onClose(); }}>
+    <div className="dialog-actions">
+      <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>{cancelLabel}</button>
+      <button type="button" className={danger ? 'btn btn-danger' : 'btn btn-primary'} onClick={onConfirm} disabled={busy}>
+        {busy && <LoaderCircle className="icon animate-spin" />}{confirmLabel}
+      </button>
+    </div>
+  </Dialog>;
 }
