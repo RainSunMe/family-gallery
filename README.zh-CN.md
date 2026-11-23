@@ -14,7 +14,7 @@
 它不是又一个 Immich：没有人脸识别、没有 AI 检索、没有手机 App、也没有账号体系 —— 只有一个共享的家庭图库、让长辈不用注册就能上传的邀请链接，以及随时可撤销的只读链接。
 
 <p align="center">
-  <img src="./docs/screenshots/01-albums.png" alt="相册列表" width="820">
+  <img src="./docs/screenshots/01-albums.jpg" alt="相册列表" width="820">
 </p>
 
 > 关键词 / Keywords: self-hosted photo album · family photo sharing · photo collection · S3 · Garage · MinIO · Go · SQLite · React
@@ -65,10 +65,28 @@
 
 ## 界面截图
 
-| | |
-| --- | --- |
-| ![照片网格](./docs/screenshots/02-photos.png)<br>**照片网格** —— 每张照片都标着上传者 | ![查看器](./docs/screenshots/03-viewer.png)<br>**查看器** —— 短效原图链接与照片信息 |
-| ![邀请页](./docs/screenshots/05-invite.png)<br>**邀请页** —— 访客无需账号即可上传 | ![登录页](./docs/screenshots/06-login.png)<br>**登录页** —— 一条共享口令，加上你的名字 |
+**全部照片** —— 每张照片都标着上传者。
+
+<p align="center">
+  <img src="./docs/screenshots/02-photos.jpg" alt="全部照片，每张都标着上传者">
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/03-viewer.jpg" alt="全屏查看器与照片信息面板" width="49%">
+  <img src="./docs/screenshots/06-login.jpg" alt="登录页：一条共享口令，加上你的名字" width="49%">
+</p>
+
+<p align="center">
+  <sub>左：查看器，短效原图链接与上传者名字。右：登录页 —— 一条共享口令，加上标注上传者的名字。</sub>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/05-invite.jpg" alt="访客打开的邀请页，无需账号" width="38%">
+</p>
+
+<p align="center">
+  <sub>邀请页：长辈打开一条链接，填个名字就能上传。没有账号，也不用装 App。</sub>
+</p>
 
 ## 快速开始
 

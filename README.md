@@ -12,7 +12,7 @@ Photos never pass through the application server: browsers upload directly to yo
 Not another Immich. There is no face recognition, no AI search, no mobile app and no account system — just one shared family library, invite links that let grandparents upload without signing up, and read-only links you can revoke.
 
 <p align="center">
-  <img src="./docs/screenshots/01-albums.png" alt="Album list" width="820">
+  <img src="./docs/screenshots/01-albums.jpg" alt="Album list" width="820">
 </p>
 
 The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANGUAGE` decides which one a visitor sees first; after signing in, the language can be changed in the settings dialog, and `?lang=zh` / `?lang=en` overrides it for a single visit.
@@ -71,11 +71,28 @@ priority.
 
 ## Screenshots
 
-| | |
-| --- | --- |
-| ![Photo grid](./docs/screenshots/02-photos.png)<br>**Photo grid** — every tile carries the uploader's name | ![Viewer](./docs/screenshots/03-viewer.png)<br>**Viewer** — expiry-scoped original, with photo info |
-| ![Invite page](./docs/screenshots/05-invite.png)<br>**Invite page** — a guest uploads with no account | ![Sign-in](./docs/screenshots/06-login.png)<br>**Sign-in** — one shared passphrase, plus your name |
+**All photos** — every tile carries the name of whoever uploaded it.
 
+<p align="center">
+  <img src="./docs/screenshots/02-photos.jpg" alt="All photos, each tile labelled with its uploader">
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/03-viewer.jpg" alt="Full-screen viewer with the photo info panel" width="49%">
+  <img src="./docs/screenshots/06-login.jpg" alt="Sign-in screen: one shared passphrase plus your name" width="49%">
+</p>
+
+<p align="center">
+  <sub>Left: the viewer, with an expiry-scoped original and the uploader's name. Right: sign-in — one shared passphrase, plus the name that labels your uploads.</sub>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/05-invite.jpg" alt="Invite page a guest sees, no account needed" width="38%">
+</p>
+
+<p align="center">
+  <sub>The invite page: a grandparent opens one link, types a name, and adds photos. No account, no app.</sub>
+</p>
 
 ## Quick start
 

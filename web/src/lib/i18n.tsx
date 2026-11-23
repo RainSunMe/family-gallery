@@ -37,7 +37,7 @@ const en: Dict = {
   'nav.settings': 'Open family space settings and permissions',
   'role.admin': 'Family admin',
   'role.member': 'Family member',
-  'role.passphrase': 'Passphrase protection on',
+  'role.passphrase': 'Passphrase on',
   'role.avatar': 'F',
   'common.cancel': 'Cancel',
   'common.close': 'Close',

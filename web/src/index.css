@@ -53,8 +53,9 @@ button,a,input,select,textarea{outline-offset:3px}
    request is made at runtime. */
 .login-hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 64%;z-index:0}
 .login-hero-scrim{position:absolute;inset:0;z-index:0;background:
-  radial-gradient(120% 78% at 0% 58%,#0a0a0ad9 0%,#0a0a0a8c 46%,#0a0a0a33 72%,transparent 100%),
-  linear-gradient(180deg,#0a0a0ac2 0%,#0a0a0a80 38%,#0a0a0a99 72%,#0a0a0adb 100%)}
+  linear-gradient(90deg,#0a0a0ab8 0%,#0a0a0a8a 38%,#0a0a0a3d 62%,transparent 82%),
+  radial-gradient(120% 78% at 0% 58%,#0a0a0a9e 0%,#0a0a0a5c 44%,#0a0a0a1a 70%,transparent 100%),
+  linear-gradient(180deg,#0a0a0a8f 0%,#0a0a0a3d 32%,#0a0a0a2e 56%,#0a0a0a8a 86%,#0a0a0ab8 100%)}
 .icon{width:18px;height:18px;stroke-width:1.65;flex-shrink:0}
 /* ---------------------------------------------------------------------------
    IconButton primitive — the only place that decides icon-button geometry.
