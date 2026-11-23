@@ -317,12 +317,16 @@ Go packaging worker ── GET / PUT ─────────> private S3 (ZI
 docker run --rm -v "$PWD":/src -w /src golang:1.27-alpine \
   sh -c 'gofmt -w cmd internal && go vet ./... && go test ./...'
 
-# Frontend: type-check and production build
+# Frontend: type-check, production build and unit tests
 docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
-  sh -c 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm build'
+  sh -c 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm build && pnpm test'
 ```
 
 For local development, run a single-node Garage (or any S3-compatible service), set `APP_ENV=development`, and use plain HTTP.
+
+Contributing with an AI agent? [AGENTS.md](./AGENTS.md) lists the constraints every
+change has to respect. The full cycle from local checks to a published image is in
+[docs/09-release-workflow.md](./docs/09-release-workflow.md).
 
 ## Current limitations
 

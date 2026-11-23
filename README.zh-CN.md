@@ -297,12 +297,15 @@ Go 打包任务 ── GET / PUT ────────> 私有 S3（ZIP 分�
 docker run --rm -v "$PWD":/src -w /src golang:1.27-alpine \
   sh -c 'gofmt -w cmd internal && go vet ./... && go test ./...'
 
-# 前端：类型检查与生产构建
+# 前端：类型检查、生产构建与单元测试
 docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
-  sh -c 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm build'
+  sh -c 'corepack enable && corepack prepare pnpm@10.28.2 --activate && pnpm install --frozen-lockfile && pnpm build && pnpm test'
 ```
 
 本地联调可以自行启动一个单节点 Garage（或任意 S3 兼容服务），把 `APP_ENV` 设为 `development` 并使用 HTTP 地址。
+
+用 AI Agent 参与开发时，先读 [AGENTS.md](./AGENTS.md)（硬性约束），完整流程见
+[docs/09-release-workflow.md](./docs/09-release-workflow.md)（从本地校验到镜像发布）。
 
 ## 当前边界
 
