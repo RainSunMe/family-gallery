@@ -18,7 +18,7 @@ through Docker, which is also how CI runs them.
 
 ```bash
 # Go: format, static analysis, unit tests
-docker run --rm -v "$PWD":/src -w /src golang:1.25-alpine \
+docker run --rm -v "$PWD":/src -w /src golang:1.27-alpine \
   sh -c 'gofmt -w cmd internal && go vet ./... && go test ./...'
 
 # Frontend: type-check and production build

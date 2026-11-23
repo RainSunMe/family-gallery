@@ -14,14 +14,14 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN rm -rf dist && pnpm build
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/server ./cmd/server
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 10001 app \
     && mkdir -p /app/data /app/web/dist \

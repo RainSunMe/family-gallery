@@ -240,7 +240,7 @@ Go 打包任务 ── GET / PUT ────────> 私有 S3（ZIP 分�
 
 ```bash
 # Go：格式化、静态检查、单元测试
-docker run --rm -v "$PWD":/src -w /src golang:1.25-alpine \
+docker run --rm -v "$PWD":/src -w /src golang:1.27-alpine \
   sh -c 'gofmt -w cmd internal && go vet ./... && go test ./...'
 
 # 前端：类型检查与生产构建
