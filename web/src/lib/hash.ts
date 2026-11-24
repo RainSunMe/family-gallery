@@ -93,3 +93,22 @@ export function hashFiles(files: File[], progress?: HashProgress): Promise<Map<F
   pump();
   return Promise.all(pending).then(() => results);
 }
+
+// hashFiles() keeps its batch counters and worker pool in module scope, so two
+// concurrent batches would overwrite each other's progress and possibly resolve
+// the wrong promise. The upload queue asks for one file at a time, so a promise
+// chain is enough to serialise them and costs nothing: hashing is CPU-bound.
+let serial: Promise<unknown> = Promise.resolve();
+
+/** Hash a single file, waiting for any other single-file hash to finish first. */
+export function hashOne(file: File): Promise<string> {
+  const next = serial.then(async () => {
+    const result = await hashFiles([file]);
+    const hash = result.get(file);
+    if (!hash) throw hashFailed();
+    return hash;
+  });
+  // Keep the chain alive after a failure so one bad file does not wedge it.
+  serial = next.catch(() => undefined);
+  return next;
+}

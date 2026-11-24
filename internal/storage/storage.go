@@ -142,3 +142,27 @@ func (s *Store) AbortMultipart(ctx context.Context, key, uploadID string) error 
 	_, err := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: &s.bucket, Key: &key, UploadId: &uploadID})
 	return err
 }
+
+// ListParts returns the parts a multipart upload already holds in the bucket.
+//
+// It is the authoritative record of what has been transferred: the browser can
+// lose its local part list when a tab is closed, and trusting the client's copy
+// would either re-upload everything or complete an upload with missing parts.
+// Results are sorted by part number, which is what CompleteMultipartUpload
+// requires.
+func (s *Store) ListParts(ctx context.Context, key, uploadID string) ([]types.Part, error) {
+	parts := make([]types.Part, 0, 16)
+	var marker *string
+	for {
+		out, err := s.client.ListParts(ctx, &s3.ListPartsInput{Bucket: &s.bucket, Key: &key, UploadId: &uploadID, PartNumberMarker: marker})
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, out.Parts...)
+		if !aws.ToBool(out.IsTruncated) || out.NextPartNumberMarker == nil {
+			break
+		}
+		marker = out.NextPartNumberMarker
+	}
+	return parts, nil
+}

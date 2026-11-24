@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
-import type { MouseEvent, ReactNode } from 'react';
-import { X, Info, CheckCircle2, Aperture, LoaderCircle } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Info, CheckCircle2, Aperture, LoaderCircle, ChevronDown, Check } from 'lucide-react';
 import { useSite } from '../lib/site';
 import { currentLocale, translate } from '../lib/i18n';
 
@@ -68,7 +69,7 @@ export function Dialog({ title, description, children, onClose, wide = false }: 
     dialog.addEventListener('keydown', escape, true);
     return () => { dialog.removeEventListener('keydown', escape, true); document.body.style.overflow = previousOverflow; if (dialog.open) dialog.close(); previouslyFocused?.focus({ preventScroll: true }); };
   }, []);
-  return <dialog ref={ref} className={`dialog ${wide ? 'sm:w-[580px]' : ''}`} aria-label={title} onCancel={event => { event.preventDefault(); closeRefLatest.current(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeRefLatest.current(); } }}>
+  return <dialog ref={ref} className={`dialog ${wide ? 'dialog-wide' : ''}`} aria-label={title} onCancel={event => { event.preventDefault(); closeRefLatest.current(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeRefLatest.current(); } }}>
     <div ref={panelRef} className="dialog-panel" onClickCapture={animatedClick}>
       <div className="dialog-grip lg:hidden" role="button" tabIndex={0} aria-label={translate(currentLocale(), 'common.dragToClose')}
         onPointerDown={dragDown} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd}
@@ -120,4 +121,206 @@ export function ConfirmDialog({ title, description, confirmLabel, cancelLabel, d
       </button>
     </div>
   </Dialog>;
+}
+
+export type SelectOption = { value: string; label: string };
+
+/**
+ * A dropdown that belongs to the app instead of the operating system.
+ *
+ * A native `<select>` opens the platform's own widget: a different font, radius
+ * and shadow from everything else here, and on phones a full-screen wheel. This
+ * keeps both the trigger and the list inside the design language — the trigger is
+ * the same box as `.field`, the list uses the same frosted surface as the create
+ * menu.
+ *
+ * The list is portalled into the surrounding `<dialog>` when there is one. A
+ * modal dialog lives in the browser's top layer, so anything appended to <body>
+ * would be painted underneath it.
+ */
+export function Select({ id, value, options, onChange, disabled = false, label, describedBy }: {
+  id?: string;
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  /** Accessible name when the visible label belongs to a separate element. */
+  label?: string;
+  describedBy?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const [popup, setPopup] = useState<{ host: HTMLElement; left: number; width: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const baseId = useId();
+  const listId = `${baseId}-list`;
+  const optionId = (index: number) => `${baseId}-option-${index}`;
+  const selectedIndex = Math.max(0, options.findIndex(option => option.value === value));
+  const selected = options[selectedIndex];
+
+  // Positioned from the trigger's rect because the list is fixed to the viewport.
+  // It flips upwards when there is more room above than below, which is what makes
+  // it usable inside a tall dialog near the bottom of the screen.
+  const measure = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+    setPopup({
+      host: trigger.closest('dialog[open]') ?? document.body,
+      left: rect.left,
+      width: rect.width,
+      maxHeight: Math.max(140, Math.min(300, openUp ? spaceAbove : spaceBelow)),
+      ...(openUp ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
+    });
+  }, []);
+
+  const openList = useCallback(() => {
+    setActive(selectedIndex);
+    measure();
+    setOpen(true);
+  }, [measure, selectedIndex]);
+
+  const close = useCallback(() => { setOpen(false); setPopup(null); }, []);
+
+  const choose = useCallback((index: number) => {
+    const option = options[index];
+    if (option) onChange(option.value);
+    close();
+    triggerRef.current?.focus({ preventScroll: true });
+  }, [close, onChange, options]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      close();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [close, open]);
+
+  // Escape is intercepted on `document` in the capture phase: the surrounding
+  // Dialog listens on the dialog element, which is a descendant of document, so
+  // this runs first and the panel stays open.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      triggerRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [close, open]);
+
+  // A fixed list does not follow the page or the window on its own.
+  useEffect(() => {
+    if (!open) return;
+    const update = () => measure();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => { window.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); };
+  }, [measure, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        if (open) setActive(index => Math.min(options.length - 1, index + 1));
+        else openList();
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        if (open) setActive(index => Math.max(0, index - 1));
+        else openList();
+        return;
+      case 'Home':
+        if (!open) return;
+        event.preventDefault();
+        setActive(0);
+        return;
+      case 'End':
+        if (!open) return;
+        event.preventDefault();
+        setActive(Math.max(0, options.length - 1));
+        return;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        if (open) choose(active);
+        else openList();
+        return;
+      case 'Escape':
+        if (!open) return;
+        event.preventDefault();
+        close();
+        return;
+      case 'Tab':
+        close();
+        return;
+      default:
+        return;
+    }
+  };
+
+  const list = open && popup ? createPortal(<div
+    ref={listRef}
+    id={listId}
+    className="select-popup"
+    role="listbox"
+    aria-label={label}
+    style={{ left: popup.left, width: popup.width, top: popup.top, bottom: popup.bottom, maxHeight: popup.maxHeight }}
+  >
+    {options.map((option, index) => <button
+      key={option.value}
+      type="button"
+      role="option"
+      id={optionId(index)}
+      data-index={index}
+      data-active={index === active}
+      aria-selected={option.value === value}
+      className="select-option"
+      onPointerEnter={() => setActive(index)}
+      onClick={() => choose(index)}
+    >
+      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      {option.value === value && <Check className="icon w-4 h-4 text-accent shrink-0" />}
+    </button>)}
+  </div>, popup.host) : null;
+
+  return <>
+    <button
+      ref={triggerRef}
+      type="button"
+      id={id}
+      className="select-trigger"
+      disabled={disabled}
+      role="combobox"
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      aria-controls={open ? listId : undefined}
+      aria-activedescendant={open ? optionId(active) : undefined}
+      aria-label={label}
+      aria-describedby={describedBy}
+      onClick={() => { if (open) close(); else openList(); }}
+      onKeyDown={onKeyDown}
+    >
+      <span>{selected?.label ?? ''}</span>
+      <ChevronDown className="select-chevron" aria-hidden="true" />
+    </button>
+    {list}
+  </>;
 }

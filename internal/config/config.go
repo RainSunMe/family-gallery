@@ -55,6 +55,13 @@ type Config struct {
 	// TrashRetention is how long soft-deleted photos are kept before the worker
 	// removes them for good. Zero means "keep forever".
 	TrashRetention time.Duration
+
+	// StaleUploadRetention is how long an unfinished upload session is kept
+	// before the worker abandons it. Abandoning also aborts the multipart
+	// upload in the bucket, which is the only way those parts get freed: an
+	// abandoned 1000-photo batch would otherwise sit in storage forever.
+	// Zero disables the sweep.
+	StaleUploadRetention time.Duration
 }
 
 func Load() (Config, error) {
@@ -90,21 +97,22 @@ func Load() (Config, error) {
 		S3UsePathStyle:   pathStyle,
 		Production:       get("APP_ENV", "production") == "production",
 
-		ReadSignTTL:        duration(get, "SIGNED_READ_TTL", 5*time.Minute),
-		UploadSignTTL:      duration(get, "SIGNED_UPLOAD_TTL", 15*time.Minute),
-		FamilySessionTTL:   duration(get, "FAMILY_SESSION_TTL", 30*24*time.Hour),
-		AdminSessionTTL:    duration(get, "ADMIN_SESSION_TTL", 12*time.Hour),
-		MultipartPartSize:  size(get, "MULTIPART_PART_SIZE", 8<<20),
-		MaxUploadSize:      size(get, "MAX_UPLOAD_SIZE", 200<<20),
-		DownloadPartSize:   size(get, "DOWNLOAD_PART_SIZE", 500<<20),
-		DownloadRetention:  duration(get, "DOWNLOAD_RETENTION", 24*time.Hour),
-		WorkerInterval:     duration(get, "WORKER_INTERVAL", 2*time.Second),
-		CollectionLinkTTL:  duration(get, "COLLECTION_SESSION_TTL", 7*24*time.Hour),
-		LoginMaxAttempts:   integer(get, "LOGIN_MAX_ATTEMPTS", 10),
-		LoginBlockDuration: duration(get, "LOGIN_BLOCK_DURATION", 5*time.Minute),
-		DedupEnabled:       boolean(get, "DEDUP_ENABLED", true),
-		DedupBackfill:      boolean(get, "DEDUP_BACKFILL", false),
-		TrashRetention:     retention(get, "TRASH_RETENTION", 30*24*time.Hour),
+		ReadSignTTL:          duration(get, "SIGNED_READ_TTL", 5*time.Minute),
+		UploadSignTTL:        duration(get, "SIGNED_UPLOAD_TTL", 15*time.Minute),
+		FamilySessionTTL:     duration(get, "FAMILY_SESSION_TTL", 30*24*time.Hour),
+		AdminSessionTTL:      duration(get, "ADMIN_SESSION_TTL", 12*time.Hour),
+		MultipartPartSize:    size(get, "MULTIPART_PART_SIZE", 8<<20),
+		MaxUploadSize:        size(get, "MAX_UPLOAD_SIZE", 200<<20),
+		DownloadPartSize:     size(get, "DOWNLOAD_PART_SIZE", 500<<20),
+		DownloadRetention:    duration(get, "DOWNLOAD_RETENTION", 24*time.Hour),
+		WorkerInterval:       duration(get, "WORKER_INTERVAL", 2*time.Second),
+		CollectionLinkTTL:    duration(get, "COLLECTION_SESSION_TTL", 7*24*time.Hour),
+		LoginMaxAttempts:     integer(get, "LOGIN_MAX_ATTEMPTS", 10),
+		LoginBlockDuration:   duration(get, "LOGIN_BLOCK_DURATION", 5*time.Minute),
+		DedupEnabled:         boolean(get, "DEDUP_ENABLED", true),
+		DedupBackfill:        boolean(get, "DEDUP_BACKFILL", false),
+		TrashRetention:       retention(get, "TRASH_RETENTION", 30*24*time.Hour),
+		StaleUploadRetention: retention(get, "STALE_UPLOAD_RETENTION", 7*24*time.Hour),
 	}
 	if cfg.FamilyPassword == "" || cfg.AdminPassword == "" {
 		return Config{}, errors.New("FAMILY_PASSWORD and ADMIN_PASSWORD must be set")

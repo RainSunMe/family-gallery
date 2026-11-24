@@ -247,6 +247,19 @@ brings the album back too.
 
 See [docs/05-trash.md](./docs/05-trash.md) for the full design.
 
+#### Unfinished uploads
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STALE_UPLOAD_RETENTION` | `168h` | How long an unfinished upload is kept before the worker abandons it and frees its parts. `0` keeps them until the client finishes or cancels. |
+
+A multipart upload only becomes an object once it is completed. Until then the
+parts sit in the bucket and are billable, so an abandoned batch would accumulate
+silently. The worker aborts those uploads and marks the session `aborted`; a
+client that comes back afterwards is told to add the file again.
+
+See [docs/09-upload-queue.md](./docs/09-upload-queue.md) for the full design.
+
 ## Object storage requirements
 
 Any S3-compatible service works: **Garage, MinIO, SeaweedFS, Ceph RGW, AWS S3**, and others.

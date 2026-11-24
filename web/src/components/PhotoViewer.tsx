@@ -159,11 +159,13 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
   }, [index, photos.length, resetTransform]);
 
   useEffect(() => {
-    const body = document.body.style;
-    const root = document.documentElement.style;
-    const previous = { bodyOverflow: body.overflow, rootOverflow: root.overflow, bodyPosition: body.position, bodyWidth: body.width };
-    body.overflow = 'hidden'; root.overflow = 'hidden'; body.position = 'fixed'; body.width = '100%';
-    return () => { body.overflow = previous.bodyOverflow; root.overflow = previous.rootOverflow; body.position = previous.bodyPosition; body.width = previous.bodyWidth; timers.current.forEach(clearTimeout); };
+    // Only the root element's overflow is toggled via a data attribute -> CSS rule
+    // (see index.css). Unlike `position: fixed` on <body>, this leaves scrollTop
+    // untouched: nothing jumps to the top and no `scroll` event fires. The
+    // scrollbar is hidden globally, so no layout shift needs compensating either.
+    const root = document.documentElement;
+    root.dataset.viewerOpen = '';
+    return () => { delete root.dataset.viewerOpen; timers.current.forEach(clearTimeout); };
   }, []);
   useEffect(() => { resetTransform(); }, [resetTransform]);
 

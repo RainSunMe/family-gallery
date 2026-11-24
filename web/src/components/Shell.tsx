@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine, Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine, Trash2, UploadCloud } from 'lucide-react';
 import { Brand } from './ui';
 import { DownloadDialog } from './LibraryPages';
 import { ShareDialog } from './SharingPages';
@@ -9,15 +10,42 @@ import type { Role, Album } from '../lib/api';
 import { listAlbums } from '../lib/api';
 import { useT } from '../lib/i18n';
 
-const navigation = [
+// Only the two doors that actually face family members belong under "Share with
+// family": a request link invites them to send photos in, a share link lets them
+// look at an album. The queue and the trash are views over this library's own
+// state, so they stay with the library. Creating an album is an action, not a
+// destination, and the topbar "+" menu already carries it.
+const sidebarSections: { label: string; items: { to: string; key: string; icon: typeof Image }[] }[] = [
+  {
+    label: 'nav.library',
+    items: [
+      { to: '/photos', key: 'nav.photos', icon: Image },
+      { to: '/albums', key: 'nav.albums', icon: LayoutGrid },
+      { to: '/uploads', key: 'queue.title', icon: UploadCloud },
+      { to: '/trash', key: 'nav.trash', icon: Trash2 },
+    ],
+  },
+  {
+    label: 'nav.sharing',
+    items: [
+      { to: '/collections', key: 'nav.collections', icon: Inbox },
+      { to: '/shares', key: 'nav.shares', icon: Link2 },
+    ],
+  },
+];
+
+// The dock carries one extra destination: the upload queue is where a phone user
+// actually needs to land while photos are still going up.
+const dockNavigation = [
   { to: '/photos', key: 'nav.photos', icon: Image },
   { to: '/albums', key: 'nav.albums', icon: LayoutGrid },
   { to: '/collections', key: 'nav.collections', icon: Inbox },
+  { to: '/uploads', key: 'queue.title', icon: UploadCloud },
   { to: '/shares', key: 'nav.shares', icon: Link2 },
 ];
 
-export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewCollection, onSettings }: {
-  children: React.ReactNode; role: Role; albumCount: number; onUpload: () => void; onNewAlbum: () => void; onNewCollection: () => void; onSettings: () => void;
+export function Shell({ children, role, albumCount, queueCount = 0, onUpload, onNewAlbum, onNewCollection, onSettings }: {
+  children: React.ReactNode; role: Role; albumCount: number; queueCount?: number; onUpload: () => void; onNewAlbum: () => void; onNewCollection: () => void; onSettings: () => void;
 }) {
   const pathname = useRouterState({ select: state => state.location.pathname });
   const navigate = useNavigate();
@@ -27,6 +55,7 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
   const [scrolled, setScrolled] = useState(false);
   const createRef = useRef<HTMLDivElement>(null);
   const t = useT();
+  const queryClient = useQueryClient();
   const { title: headerTitle, back, download, share } = useHeaderTitleState();
   const active = (to: string) => pathname === to || (to === '/albums' && pathname.startsWith('/albums/')) || (to === '/collections' && pathname.startsWith('/collections/'));
   useEffect(() => {
@@ -55,16 +84,17 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
   return <div className="min-h-dvh">
     <aside className="sidebar fixed inset-y-0 left-0 z-20 hidden lg:flex w-[232px] flex-col px-4 py-7 border-r border-line/50">
       <Link to="/albums" className="px-3 mb-9" aria-label={t('nav.albumsHome')}><Brand /></Link>
-      <p className="text-[11px] text-muted px-3 mb-2">{t('nav.library')}</p>
-      <nav className="flex flex-col gap-1 mb-6" aria-label={t('nav.desktop')}>
-        {navigation.slice(0,3).map(item => <Link key={item.to} to={item.to} className={`nav-link ${active(item.to) ? 'active' : ''}`}><item.icon className="icon" /><span>{t(item.key)}</span>{item.to === '/albums' && <small className="ml-auto text-[10px] text-muted">{albumCount}</small>}</Link>)}
-      </nav>
-      <p className="text-[11px] text-muted px-3 mb-2">{t('nav.sharing')}</p>
-      <nav className="flex flex-col gap-1" aria-label={t('nav.sharingCreate')}>
-        <Link to="/shares" className={`nav-link ${active('/shares') ? 'active' : ''}`}><Link2 className="icon" /><span>{t('nav.shares')}</span></Link>
-        <button className="nav-link" onClick={onNewAlbum}><FolderPlus className="icon" /><span>{t('nav.newAlbum')}</span></button>
-        <Link to="/trash" className={`nav-link ${active('/trash') ? 'active' : ''}`}><Trash2 className="icon" /><span>{t('nav.trash')}</span></Link>
-      </nav>
+      {sidebarSections.map((section, sectionIndex) => <Fragment key={section.label}>
+        <p className={`text-[11px] text-muted px-3 mb-2 ${sectionIndex > 0 ? 'mt-7' : ''}`}>{t(section.label)}</p>
+        <nav className="flex flex-col gap-1" aria-label={t(section.label)}>
+          {section.items.map(item => <Link key={item.to} to={item.to} className={`nav-link ${active(item.to) ? 'active' : ''}`}>
+            <item.icon className="icon" />
+            <span>{t(item.key)}</span>
+            {item.to === '/albums' && <small className="ml-auto text-[10px] text-muted">{albumCount}</small>}
+            {item.to === '/uploads' && queueCount > 0 && <small className="ml-auto text-[10px] text-accent font-medium">{queueCount}</small>}
+          </Link>)}
+        </nav>
+      </Fragment>)}
       <div className="mt-auto pt-6 border-t border-line/70">
         <button className="w-full flex items-center gap-2.5 p-2 rounded-[10px] text-left hover:bg-soft" onClick={onSettings} aria-label={t('nav.settings')}>
           <span className="w-9 h-9 grid place-items-center rounded-full bg-accent-soft text-accent text-[13px]">{t('role.avatar')}</span>
@@ -75,7 +105,7 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
     </aside>
     <main className="lg:ml-[232px] min-h-dvh pb-28 lg:pb-0">
       <div className="topbar-spacer lg:hidden" aria-hidden="true" />
-      <div className="topbar-frame">
+      <div className={`topbar-frame ${scrolled ? 'is-scrolled' : ''}`}>
       <header className={`topbar ${scrolled ? 'is-scrolled' : ''} ${headerTitle ? 'has-title' : ''} fixed top-0 left-0 right-0 z-10 h-16 flex items-center justify-between px-5`}>
         <span className="topbar-glass" aria-hidden="true" />
         <div className={`mobile-title-slot ${back ? 'has-back' : ''}`}>
@@ -87,6 +117,7 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
         <div className="flex items-center p-0 topbar-actions">
           {share && <button className="icon-btn plain-action topbar-icon topbar-search" onClick={openShare} aria-label={t('nav.shareAlbum')}><Link2 className="icon" /></button>}
           {download && <button className="icon-btn plain-action topbar-icon topbar-download" onClick={() => setDownloading(true)} aria-label={t('nav.downloadAlbum')}><ArrowDownToLine className="icon" /></button>}
+          {queueCount > 0 && <Link to="/uploads" className="icon-btn plain-action topbar-icon" aria-label={t('queue.activeCount', { count: queueCount })} title={t('queue.activeCount', { count: queueCount })}><UploadCloud className="icon" /></Link>}
           <div className="relative topbar-create" ref={createRef}>
             <button className="icon-btn topbar-icon create-button" onClick={() => setCreating(value => !value)} aria-label={t('nav.create')} aria-expanded={creating} aria-haspopup="menu"><Plus className="icon" /></button>
             {creating && <div className="create-menu" role="menu">
@@ -100,11 +131,14 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
       </div>
       {children}
       {downloading && download && <DownloadDialog albumID={download} photoIDs={[]} onClose={() => setDownloading(false)} />}
-      {sharing && <ShareDialog album={sharing} onClose={() => setSharing(null)} onCreated={() => setSharing(null)} />}
+      {sharing && <ShareDialog album={sharing} onClose={() => setSharing(null)} onCreated={() => { void queryClient.invalidateQueries({ queryKey: ['albums'] }); void queryClient.invalidateQueries({ queryKey: ['album', sharing.id] }); }} />}
     </main>
     <nav className={back ? 'mobile-dock is-hidden' : 'mobile-dock'} aria-label={t('nav.mobile')}>
-      <span className="mobile-dock-pill" aria-hidden="true" />
-      {navigation.map(item => <Link key={item.to} to={item.to} className={active(item.to) ? 'active' : ''} aria-label={t(item.key)} title={t(item.key)} aria-current={active(item.to) ? 'page' : undefined}><item.icon className="icon" /></Link>)}
+      {dockNavigation.map(item => <Link key={item.to} to={item.to} className={active(item.to) ? 'active' : ''} aria-label={t(item.key)} title={t(item.key)} aria-current={active(item.to) ? 'page' : undefined}>
+        <item.icon className="icon" />
+        {/* Only the queue can be busy in the background, so only it needs a dot. */}
+        {item.to === '/uploads' && queueCount > 0 && <span className="mobile-dock-dot" aria-hidden="true" />}
+      </Link>)}
     </nav>
     <style>{`
       .nav-link{display:flex;align-items:center;gap:11px;min-height:44px;padding:10px 12px;border-radius:9px;font-size:13px;color:var(--color-secondary);text-align:left;position:relative}
@@ -117,11 +151,11 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
       .sidebar{background:var(--color-sidebar)}
       .topbar{background:transparent;transition:background .24s ease,border-color .24s ease}
       .topbar-spacer{flex-shrink:0}
-      .topbar-glass{position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:0;background:linear-gradient(180deg,#ffffffc9,#ffffffdb);backdrop-filter:blur(28px) saturate(190%);-webkit-backdrop-filter:blur(28px) saturate(190%);border-bottom:1px solid #ffffff7a;transition:opacity .26s ease}
-      .topbar-glass:before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,#ffffff3d,transparent 55%);pointer-events:none}
+      /* One frosted panel, no stacked gradients: a flat tint, a real backdrop
+         blur and a hairline border read as glass; layered gradients read as fog. */
+      .topbar-glass{position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:0;background:rgba(255,255,255,.72);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-bottom:1px solid rgba(17,24,39,.08);transition:opacity .26s ease}
       .topbar.is-scrolled .topbar-glass{opacity:1}
-      .dark .topbar-glass{background:linear-gradient(180deg,#252a31e0,#22262cf2);border-bottom-color:#ffffff17}
-      .dark .topbar-glass:before{background:linear-gradient(180deg,#ffffff0f,transparent 60%)}
+      .dark .topbar-glass{background:rgba(18,19,22,.74);border-bottom-color:rgba(255,255,255,.08)}
       .mobile-title-slot{position:relative;display:flex;align-items:center;min-width:0;flex:1;height:100%;overflow:visible;mask-image:linear-gradient(90deg,#000 92%,transparent)}
       .mobile-brand{display:inline-flex;align-items:center;transition:transform .34s cubic-bezier(.22,.78,.2,1),opacity .24s ease}
       .mobile-brand.is-hidden{transform:translateY(-120%);opacity:0;pointer-events:none;position:absolute;left:0;top:50%;margin-top:-16px}
@@ -140,33 +174,54 @@ export function Shell({ children, role, albumCount, onUpload, onNewAlbum, onNewC
       .create-menu strong{display:block;font-size:var(--text-secondary);font-weight:500;color:var(--color-ink)}
       .create-menu small{display:block;font-size:var(--text-caption);color:var(--color-muted);margin-top:3px}
       @media(min-width:1024px){
-        .topbar-frame{display:block;height:0;position:relative;z-index:20;max-width:1580px;margin:0 auto;padding:0 var(--page-x)}
-        .topbar{position:absolute;left:var(--page-x);right:var(--page-x);top:var(--topbar-top);width:auto;min-width:0;height:48px;padding:0}
-        /* Secondary pages keep the same back affordance on desktop; only the
-           mobile brand and the scrolling heading label are desktop-hidden. */
-        .topbar .mobile-title-slot{display:none}
-        .topbar .mobile-title-slot.has-back{display:flex;flex:0 0 auto;overflow:visible;mask-image:none}
-        .topbar .mobile-title-slot.has-back .mobile-brand,
-        .topbar .mobile-title-slot.has-back .mobile-heading-title{display:none}
+        /* The bar used to be absolute inside a zero-height frame, so it scrolled
+           away with the page. It is now pinned to the viewport across the whole
+           area right of the sidebar: the frosted panel spans that full width via
+           the frame's own layer, while the inner row stays aligned with the
+           centred content column. */
+        .topbar-frame{display:block;position:fixed;top:0;left:232px;right:0;z-index:20;height:calc(64px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top);max-width:none;margin:0}
+        /* Nothing is painted until the content slides under the bar: at rest the
+           header is invisible, exactly like on mobile. */
+        .topbar-frame:before{content:'';position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:0;background:rgba(255,255,255,.72);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-bottom:1px solid rgba(17,24,39,.08);transition:opacity .26s ease}
+        .topbar-frame.is-scrolled:before{opacity:1}
+        .dark .topbar-frame:before{background:rgba(18,19,22,.74);border-bottom-color:rgba(255,255,255,.08)}
+        /* The mobile glass layer would otherwise paint a second panel. */
+        .topbar .topbar-glass{display:none}
+        .topbar{position:relative;inset:auto;left:auto;right:auto;top:auto;width:100%;max-width:1580px;margin:0 auto;height:100%;padding:0 var(--page-x);display:flex;align-items:center;justify-content:space-between;background:transparent}
+        /* The brand lives in the sidebar on desktop, so the slot only carries the
+           back button and the title that slides in once the heading scrolls under. */
+        .topbar .mobile-title-slot{display:flex;flex:1;min-width:0;position:relative;overflow:visible;mask-image:none}
+        .topbar .mobile-brand{display:none}
+        .topbar .mobile-title-slot.has-back{flex:0 0 auto}
+        .topbar .mobile-title-slot.has-back .mobile-heading-title{left:44px}
+        .topbar .mobile-heading-title{display:block}
         /* Same action cluster on the right at every breakpoint: the leading edge
            stays free for content, so nothing can overlap the page heading. */
         .topbar-actions{margin-left:auto}
       }
       @media(max-width:1023px){
         .topbar-spacer{height:calc(56px + env(safe-area-inset-top))}
-        .mobile-dock{display:flex;position:fixed;left:50%;right:auto;bottom:calc(13px + env(safe-area-inset-bottom));transform:translateX(-50%);width:264px;max-width:calc(100vw - 48px);height:60px;padding:6px 9px;gap:7px;align-items:center;justify-content:space-between;border-radius:100px;z-index:30;isolation:isolate;background:transparent;border:1px solid transparent;backdrop-filter:blur(30px) saturate(200%);-webkit-backdrop-filter:blur(30px) saturate(200%);transition:transform .26s cubic-bezier(.22,.78,.2,1),opacity .2s ease}
+        /* Five destinations in a pill narrow enough not to crowd a 360px screen:
+           38px hit targets, 2px gaps, 5px padding. Same single-layer glass recipe
+           as the header — one tint, one blur, one hairline. */
+        .mobile-dock{display:flex;position:fixed;left:50%;right:auto;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);width:auto;max-width:calc(100vw - 32px);height:54px;padding:5px 7px;gap:2px;align-items:center;justify-content:center;border-radius:999px;z-index:30;isolation:isolate;background:rgba(255,255,255,.68);border:1px solid rgba(255,255,255,.6);box-shadow:0 12px 30px -10px rgba(16,24,40,.26),0 2px 8px -2px rgba(16,24,40,.1),inset 0 1px 0 rgba(255,255,255,.75);backdrop-filter:blur(24px) saturate(190%);-webkit-backdrop-filter:blur(24px) saturate(190%);transition:transform .26s cubic-bezier(.22,.78,.2,1),opacity .2s ease}
         .mobile-dock.is-hidden{display:none}
-        .mobile-dock-pill{position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,#ffffffa8,#ffffff73);border:1px solid #ffffffc2;box-shadow:0 8px 30px #18243024,inset 0 1px 0 #ffffffd9,inset 0 -1px 0 #ffffff45}
-        .mobile-dock-pill:after{content:'';position:absolute;inset:0;border-radius:inherit;background:linear-gradient(125deg,#ffffff5c,transparent 45%)}
-        .dark .mobile-dock-pill{background:linear-gradient(180deg,#2b3038b3,#24282ea6);border-color:#ffffff26;box-shadow:0 8px 30px #0005,inset 0 1px 0 #ffffff1a}
-        .mobile-dock a{position:relative;display:grid;place-items:center;flex:0 0 48px;width:48px;height:46px;border-radius:50%;color:#40605f;transition:background .2s,color .2s,transform .2s}
+        .dark .mobile-dock{background:rgba(24,25,28,.7);border-color:rgba(255,255,255,.1);box-shadow:0 12px 30px -10px rgba(0,0,0,.6),0 2px 8px -2px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.08)}
+        .mobile-dock a{position:relative;display:grid;place-items:center;flex:0 0 40px;width:40px;height:42px;border-radius:999px;color:#3f4b4d;transition:background .2s,color .2s,transform .2s}
         .dark .mobile-dock a{color:#b4c3c6}
-        .mobile-dock a .icon{width:23px;height:23px;stroke-width:1.7}
-        .mobile-dock a.active{color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 14%,transparent)}
-        .mobile-dock a:active{background:color-mix(in srgb,var(--color-accent) 22%,transparent);transform:scale(.92)}
+        .mobile-dock a .icon{width:20px;height:20px;stroke-width:1.7}
+        .mobile-dock a.active{color:var(--color-ink);background:rgba(17,24,39,.09)}
+        .dark .mobile-dock a.active{background:rgba(255,255,255,.14)}
+        .mobile-dock a:active{transform:scale(.92)}
+        .mobile-dock-dot{position:absolute;top:7px;right:8px;width:6px;height:6px;border-radius:999px;background:var(--color-accent)}
+        .dark .mobile-dock-dot{background:#fafafa}
         .topbar{padding-top:env(safe-area-inset-top);height:calc(56px + env(safe-area-inset-top));padding-left:var(--page-x);padding-right:calc(var(--page-x) + env(safe-area-inset-right))}
       }
-      @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.topbar.is-scrolled .topbar-glass{opacity:1;background:var(--color-surface)}.mobile-dock-pill{background:var(--color-surface)}}
+      @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+        .topbar.is-scrolled .topbar-glass{opacity:1;background:var(--color-surface)}
+        .topbar-frame:before{background:var(--color-surface)}
+        .mobile-dock{background:var(--color-surface)}
+      }
     `}</style>
   </div>;
 }

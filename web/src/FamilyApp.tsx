@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, createContext, useContext } from 'react';
+import { useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
 import type { FormEvent } from 'react';
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,9 +9,12 @@ import { Dialog, ConfirmDialog, Toast } from './components/ui';
 import { HeaderTitleProvider } from './components/HeaderTitleContext';
 import { LoginPage, SettingsDialog } from './components/AuthSettings';
 import { InviteDialog, NewCollectionDialog, ShareDialog } from './components/SharingPages';
-import { UploadDialog } from './components/UploadDialog';
+import { UploadSourceDialog } from './components/UploadSourceDialog';
 import { api, createAlbum, deleteAlbum, listAlbums, listCollections, restorePhotos, trashPhotos } from './lib/api';
 import { useT } from './lib/i18n';
+import { useQueue, useCompletedTick } from './lib/queue/store';
+import { start as startQueue, rebindSource } from './lib/queue/runner';
+import { canPickDirectory, DirectorySource, FileListSource, pickDirectory, pickFilesDialog } from './lib/queue/source';
 import type { Album, Collection, Role } from './lib/api';
 import './index.css';
 
@@ -21,8 +24,7 @@ export function FamilyApp() {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [newAlbum, setNewAlbum] = useState(false);
   const [newCollection, setNewCollection] = useState(false);
-  const [upload, setUpload] = useState(false);
-  const [settings, setSettings] = useState(false);
+  const [upload, setUpload] = useState(false);  const [settings, setSettings] = useState(false);
   const [shareAlbum, setShareAlbum] = useState<Album | null>(null);
   const [invite, setInvite] = useState<Collection | null>(null);
   const [search, setSearch] = useState(false);
@@ -77,21 +79,56 @@ export function FamilyApp() {
   }, [client, refreshAlbums, t]);
   const requestTrash = useCallback((ids: string[]) => { if (ids.length) setPendingTrash(ids); }, []);
   useEffect(() => { api<{ role: Role }>('/auth/session').then(result => setRole(result.role)).catch(() => setRole(null)); }, []);
+  // Resume anything a previous visit left unfinished. `start` is idempotent, so
+  // it is safe that StrictMode runs this twice.
+  useEffect(() => { if (role && role !== 'loading') void startQueue(); }, [role]);
   useEffect(() => { if (role && role !== 'loading') refreshAlbums().catch(reason => setToast({ message: reason.message })); }, [role, refreshAlbums]);
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { localStorage.setItem('cg-theme', dark ? 'dark' : 'light'); } catch { /* storage optional */ } }, [dark]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearch(true); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
+  // Every hook below must stay above the early returns: a hook after them would
+  // run on some renders and not others.
+  const queueRecords = useQueue();
+  const completedTick = useCompletedTick();
+  // Finished rows are removed from the queue, so the refresh is driven by a
+  // counter rather than by counting rows that no longer exist.
+  const queueDone = useCallback(() => { client.invalidateQueries(); refreshAlbums(); }, [client, refreshAlbums]);
+  const seenTick = useRef(0);
+  useEffect(() => {
+    if (completedTick > seenTick.current) queueDone();
+    seenTick.current = completedTick;
+  }, [completedTick, queueDone]);
+  // A batch that lost its files after a reload can be revived by pointing at the
+  // folder again; the records themselves were never discarded.
+  const reattach = useCallback(async (sessionId: string) => {
+    try {
+      if (canPickDirectory()) {
+        const directory = await pickDirectory('gallery-upload-source');
+        if (!directory) return;
+        const source = new DirectorySource(directory);
+        await rebindSource(sessionId, source, await source.list());
+        return;
+      }
+      const files = await pickFilesDialog();
+      if (!files.length) return;
+      const source = new FileListSource(files);
+      await rebindSource(sessionId, source, await source.list());
+    } catch (reason) {
+      setToast({ message: reason instanceof Error ? reason.message : t('queue.failedGeneric') });
+    }
+  }, [t]);
   if (role === 'loading') return <main className="min-h-dvh grid place-items-center"><LoaderCircle className="w-7 h-7 animate-spin text-accent" /></main>;
   if (!role) return <LoginPage onLogin={value => { setRole(value); client.clear(); }} />;
   const initialAlbum = path.startsWith('/albums/') ? path.split('/').pop() || albums[0]?.id || '' : albums[0]?.id || '';
-  return <HeaderTitleProvider><Shell role={role} albumCount={albums.length} onUpload={() => setUpload(true)} onNewAlbum={() => setNewAlbum(true)} onNewCollection={() => setNewCollection(true)} onSettings={() => setSettings(true)}>
-    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: requestTrash, onDeleteAlbum: deleteWholeAlbum, onToast: notify }}>
+  const activeQueue = queueRecords.filter(record => record.status !== 'skipped' && record.status !== 'failed').length;
+  return <HeaderTitleProvider><Shell role={role} albumCount={albums.length} queueCount={activeQueue} onUpload={() => setUpload(true)} onNewAlbum={() => setNewAlbum(true)} onNewCollection={() => setNewCollection(true)} onSettings={() => setSettings(true)}>
+    <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: requestTrash, onDeleteAlbum: deleteWholeAlbum, onReattach: reattach, onToast: notify }}>
       <Outlet />
     </FamilyActionsContext.Provider>
     {newAlbum && <NewAlbumDialog onClose={() => setNewAlbum(false)} onCreated={async album => { await refreshAlbums(); setNewAlbum(false); navigate({ to: '/albums/$albumID', params: { albumID: album.id } }); }} />}
-    {upload && <UploadDialog albums={albums} initialAlbum={initialAlbum} onClose={() => setUpload(false)} onComplete={() => { client.invalidateQueries(); refreshAlbums(); }} />}
+    {upload && <UploadSourceDialog albums={albums} initialAlbum={initialAlbum} onClose={() => setUpload(false)} onQueued={() => { setUpload(false); navigate({ to: '/uploads' }); }} />}
     {newCollection && <NewCollectionDialog albums={albums} onClose={() => setNewCollection(false)} onCreated={setInvite} />}
     {invite && <InviteDialog collection={invite} onClose={() => setInvite(null)} />}
-    {shareAlbum && <ShareDialog album={shareAlbum} onClose={() => setShareAlbum(null)} onCreated={() => { client.invalidateQueries({ queryKey: ['albums'] }); setToast({ message: t('share.created') }); }} />}
+    {shareAlbum && <ShareDialog album={shareAlbum} onClose={() => setShareAlbum(null)} onCreated={() => client.invalidateQueries({ queryKey: ['albums'] })} />}
     {settings && <SettingsDialog role={role} dark={dark} onTheme={() => setDark(value => !value)} onClose={() => setSettings(false)} onLogout={async () => { await api('/auth/logout', { method: 'POST', body: '{}' }); setRole(null); setSettings(false); }} />}
     {search && <SearchDialog onClose={() => setSearch(false)} />}
     {pendingTrash && <ConfirmDialog
@@ -130,6 +167,8 @@ export type FamilyActions = {
   onShare: (album: Album) => void;
   onTrash: (ids: string[]) => void;
   onDeleteAlbum: (albumID: string) => void;
+  /** Re-grant access to the source of a batch that survived a reload. */
+  onReattach: (sessionId: string) => void;
   onToast: (message: string) => void;
 };
 export const FamilyActionsContext = createContext<FamilyActions | null>(null);

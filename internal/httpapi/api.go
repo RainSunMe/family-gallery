@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -91,7 +93,10 @@ func (a *API) Routes() http.Handler {
 		r.Delete("/trash", a.requireAdmin(a.emptyTrash))
 		r.Post("/uploads", a.createUpload)
 		r.Post("/uploads/check", a.checkDuplicates)
+		r.Get("/uploads/pending", a.listPendingUploads)
 		r.Post("/uploads/{uploadID}/parts/sign", a.signUploadPart)
+		r.Post("/uploads/{uploadID}/parts/list", a.listUploadParts)
+		r.Post("/uploads/{uploadID}/resign", a.resignUpload)
 		r.Post("/uploads/{uploadID}/complete", a.completeUpload)
 		r.Delete("/uploads/{uploadID}", a.abortUpload)
 		r.Put("/storage/cors", a.requireAdmin(a.configureStorageCORS))
@@ -385,6 +390,24 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, output any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(output); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", T(r)("invalid_request"))
+		return false
+	}
+	return true
+}
+
+// decodeOptionalJSON behaves like decodeJSON but treats an empty body as "no
+// fields supplied" instead of a bad request. The upload queue depends on this:
+// a client that lost its local part list completes an upload with no body and
+// lets the server ask the bucket what it already holds.
+func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, output any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", T(r)("invalid_request"))
 		return false
 	}

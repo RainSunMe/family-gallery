@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/go-chi/chi/v5"
 )
@@ -28,6 +29,11 @@ type uploadRequest struct {
 	// file in the browser. Empty means the file had none and the upload time is
 	// used instead.
 	TakenAt string `json:"taken_at"`
+	// ClientMtime is the browser's file.lastModified. Together with name and
+	// size it re-identifies a local file on resume without waiting for the
+	// SHA-256 to be recomputed. It is a hint used for matching, never a security
+	// boundary: the server does not trust it for anything else.
+	ClientMtime int64 `json:"client_mtime"`
 }
 
 // cleanTakenAt validates a client-supplied capture time. It must be RFC3339 and
@@ -59,6 +65,20 @@ func cleanContributor(value string) string {
 		runes = runes[:100]
 	}
 	return string(runes)
+}
+
+// cleanClientMtime keeps only a plausible file modification time in
+// milliseconds. An unusable value is dropped rather than rejected: the worst it
+// can do is make resume fall back to recomputing the hash.
+func cleanClientMtime(value int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	const year2100 = 4102444800000
+	if value > year2100 {
+		return 0
+	}
+	return value
 }
 
 func validateUpload(input uploadRequest, maxSize int64) (string, bool) {
@@ -113,7 +133,7 @@ func (a *API) createUpload(w http.ResponseWriter, r *http.Request) {
 	if input.AllowDuplicate {
 		allow = 1
 	}
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,content_hash,allow_duplicate,taken_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), hash, allow, cleanTakenAt(input.TakenAt), now())
+	_, err := a.db.ExecContext(r.Context(), `INSERT INTO upload_sessions(id,scope_type,scope_id,actor_hash,original_key,name,size,mime,width,height,contributor,content_hash,allow_duplicate,taken_at,client_mtime,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, "album", input.AlbumID, p.Hash, key, input.Name, input.Size, mime, input.Width, input.Height, cleanContributor(input.Contributor), hash, allow, cleanTakenAt(input.TakenAt), cleanClientMtime(input.ClientMtime), now())
 	if err != nil {
 		a.internal(w, err)
 		return
@@ -240,8 +260,17 @@ func (a *API) completeFamilyUpload(w http.ResponseWriter, r *http.Request, id st
 		a.internal(w, err)
 		return
 	}
-	if _, err = tx.ExecContext(r.Context(), `UPDATE upload_sessions SET status='completed' WHERE id=? AND status='pending'`, id); err != nil {
+	// The claim must affect a row. If it does not, the stale-upload sweeper got
+	// there first and will free the objects we just referenced, so committing
+	// would leave a photo row pointing at nothing.
+	result, err := tx.ExecContext(r.Context(), `UPDATE upload_sessions SET status='completed' WHERE id=? AND status='pending'`, id)
+	if err != nil {
 		a.internal(w, err)
+		return
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+		tx.Rollback()
+		writeError(w, http.StatusConflict, "UPLOAD_NOT_FOUND", T(r)("upload_finished"))
 		return
 	}
 	if err = tx.Commit(); err != nil {
@@ -254,22 +283,143 @@ func (a *API) finishMultipart(w http.ResponseWriter, r *http.Request, key, uploa
 	if uploadID == "" {
 		return true
 	}
+	// A client that survived a refresh no longer holds its part list, so it may
+	// send no body at all. In that case the bucket is the authority: ListParts
+	// reports exactly what was transferred, which lets an interrupted upload be
+	// completed without re-sending a single byte.
 	var input struct {
 		Parts []types.CompletedPart `json:"parts"`
 	}
-	if !decodeJSON(w, r, &input) {
+	if !decodeOptionalJSON(w, r, &input) {
 		return false
 	}
-	if len(input.Parts) == 0 {
-		writeError(w, http.StatusBadRequest, "PARTS_REQUIRED", T(r)("parts_required"))
-		return false
+	parts := input.Parts
+	if len(parts) == 0 {
+		listed, err := a.store.ListParts(r.Context(), key, uploadID)
+		if err != nil {
+			a.log.Warn("list parts failed", "error", err)
+			writeError(w, http.StatusBadRequest, "MULTIPART_INCOMPLETE", T(r)("multipart_incomplete"))
+			return false
+		}
+		if len(listed) == 0 {
+			writeError(w, http.StatusBadRequest, "MULTIPART_INCOMPLETE", T(r)("multipart_incomplete"))
+			return false
+		}
+		parts = make([]types.CompletedPart, 0, len(listed))
+		for _, part := range listed {
+			parts = append(parts, types.CompletedPart{ETag: part.ETag, PartNumber: part.PartNumber})
+		}
 	}
-	if err := a.store.CompleteMultipart(r.Context(), key, uploadID, input.Parts); err != nil {
+	if err := a.store.CompleteMultipart(r.Context(), key, uploadID, parts); err != nil {
 		a.log.Warn("complete multipart failed", "error", err)
 		writeError(w, http.StatusBadRequest, "MULTIPART_INCOMPLETE", T(r)("multipart_incomplete"))
 		return false
 	}
 	return true
+}
+
+// pendingUpload is one unfinished session as reported to the upload queue.
+type pendingUpload struct {
+	ID          string `json:"id"`
+	AlbumID     string `json:"album_id"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	Mime        string `json:"mime"`
+	ContentHash string `json:"content_hash"`
+	ClientMtime int64  `json:"client_mtime"`
+	TakenAt     string `json:"taken_at"`
+	Multipart   bool   `json:"multipart"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// listPendingUploads reports the sessions this actor started but never finished.
+// It is what lets the browser restore a queue by itself: after a refresh the
+// client asks the server what is still open instead of relying on a human to
+// remember where the batch got to.
+func (a *API) listPendingUploads(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,scope_id,original_key,name,size,mime,content_hash,client_mtime,taken_at,cos_upload_id,created_at FROM upload_sessions WHERE actor_hash=? AND status='pending' ORDER BY created_at DESC LIMIT 500`, principal(r).Hash)
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]pendingUpload, 0, 32)
+	for rows.Next() {
+		var item pendingUpload
+		var multipartID string
+		if err := rows.Scan(&item.ID, &item.AlbumID, &item.Key, &item.Name, &item.Size, &item.Mime, &item.ContentHash, &item.ClientMtime, &item.TakenAt, &multipartID, &item.CreatedAt); err != nil {
+			a.internal(w, err)
+			return
+		}
+		item.Multipart = multipartID != ""
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		a.internal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// uploadPart is one already-transferred part as the bucket reports it.
+type uploadPart struct {
+	PartNumber int32  `json:"part_number"`
+	ETag       string `json:"etag"`
+	Size       int64  `json:"size"`
+}
+
+// listUploadParts answers "which parts do you already have?" for one upload.
+// It is called only when a resume actually happens, so a 1000-photo queue does
+// not turn into 1000 bucket round trips.
+func (a *API) listUploadParts(w http.ResponseWriter, r *http.Request) {
+	_, _, key, uploadID, _, _, err := a.uploadForActor(r, chi.URLParam(r, "uploadID"))
+	if err != nil || uploadID == "" {
+		writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND", T(r)("upload_not_found"))
+		return
+	}
+	parts, err := a.store.ListParts(r.Context(), key, uploadID)
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	items := make([]uploadPart, 0, len(parts))
+	for _, part := range parts {
+		items = append(items, uploadPart{
+			PartNumber: aws.ToInt32(part.PartNumber),
+			ETag:       aws.ToString(part.ETag),
+			Size:       aws.ToInt64(part.Size),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"parts": items, "part_size": a.cfg.MultipartPartSize})
+}
+
+// resignUpload re-issues the presigned URLs for an unfinished upload.
+//
+// Signatures expire (SIGNED_UPLOAD_TTL, 15 minutes by default), so a batch
+// resumed the next day cannot use the URLs it was handed yesterday. This
+// deliberately reuses the existing multipart upload id: calling StartMultipart
+// again would create a second upload for the same key and orphan the parts
+// already sitting in the bucket.
+func (a *API) resignUpload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "uploadID")
+	_, _, key, uploadID, mime, _, err := a.uploadForActor(r, id)
+	if err != nil {
+		// The session is gone or already finished; the client must re-enqueue.
+		writeError(w, http.StatusConflict, "UPLOAD_EXPIRED", T(r)("upload_expired"))
+		return
+	}
+	url := ""
+	if uploadID == "" {
+		url, err = a.store.SignUpload(r.Context(), key, mime)
+		if err != nil {
+			a.internal(w, err)
+			return
+		}
+	}
+	thumbURL, _ := a.store.SignUpload(r.Context(), strings.Replace(key, "/originals/", "/thumbs/", 1)+".webp", "image/webp")
+	previewURL, _ := a.store.SignUpload(r.Context(), strings.Replace(key, "/originals/", "/previews/", 1)+".webp", "image/webp")
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "key": key, "url": url, "thumb_url": thumbURL, "preview_url": previewURL, "multipart_upload_id": uploadID, "part_size": a.cfg.MultipartPartSize})
 }
 func (a *API) abortUpload(w http.ResponseWriter, r *http.Request) {
 	_, _, key, uploadID, _, _, err := a.uploadForActor(r, chi.URLParam(r, "uploadID"))

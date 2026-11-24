@@ -94,6 +94,20 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("migrate taken_at column: %w", err)
 		}
 	}
+	// Upload queue: client_mtime lets a resumed browser re-identify a local file
+	// by name+size+mtime before it has recomputed the SHA-256, so an interrupted
+	// batch can continue instead of starting over. The index backs the pending
+	// list that powers "you have N unfinished uploads".
+	for _, statement := range []string{
+		`ALTER TABLE upload_sessions ADD COLUMN client_mtime INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS upload_sessions_pending ON upload_sessions(actor_hash, status, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS upload_sessions_status ON upload_sessions(status, created_at)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("migrate upload queue: %w", err)
+		}
+	}
 	return db, nil
 }
 

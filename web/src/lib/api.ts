@@ -24,6 +24,15 @@ export type Share = { id: string; album_id: string; album_name: string; album_co
 export type DownloadPackage = { id: string; part: number; size: string; file_count: number };
 export type DownloadJob = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; progress: number; error: string; packages: DownloadPackage[]; expires_at: string };
 export type UploadGrant = { id: string; key: string; url: string; thumb_url: string; preview_url: string; multipart_upload_id: string; part_size: number };
+// A session the server still holds for this browser: it was started and never
+// completed. Used to rebuild the upload queue after a refresh.
+export type PendingUpload = {
+  id: string; album_id: string; key: string; name: string; size: number; mime: string;
+  content_hash: string; client_mtime: number; taken_at: string; multipart: boolean; created_at: string;
+};
+// A part the bucket already holds. The server is the authority here: the browser
+// cannot be trusted to remember what it sent across a refresh.
+export type UploadPart = { part_number: number; etag: string; size: number };
 export type ExistingPhoto = { id: string; name: string; contributor: string; taken_at: string; thumb_url: string };
 export type DuplicateCheck = { duplicates: Record<string, ExistingPhoto>; new: string[]; legacy_photos: number };
 export type TrashItem = {
@@ -87,6 +96,13 @@ export const deleteAlbum = (id: string) => api<{ deleted: boolean; photos: numbe
 export const signPhoto = (id: string, variant = 'original', guestToken = '', download = false) => guestToken.startsWith('collection:')
   ? api<{ url: string }>(`/collections/${guestToken.slice(11)}/sign-read`, { method: 'POST', body: JSON.stringify({ item_id: id, variant }) })
   : api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/media/sign-read`, { method: 'POST', body: JSON.stringify({ photo_id: id, variant, download }) });
+
+// Upload queue. `pendingUploads` is what makes the queue survive a refresh: the
+// browser asks the server which sessions are still open instead of trusting its
+// own memory.
+export const pendingUploads = () => api<{ items: PendingUpload[] }>('/uploads/pending');
+export const uploadParts = (id: string) => api<{ parts: UploadPart[]; part_size: number }>(`/uploads/${id}/parts/list`, { method: 'POST', body: '{}' });
+export const resignUpload = (id: string) => api<UploadGrant>(`/uploads/${id}/resign`, { method: 'POST', body: '{}' });
 
 export async function copyText(text: string) {
   try { await navigator.clipboard.writeText(text); }

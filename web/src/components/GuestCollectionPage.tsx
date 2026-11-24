@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpFromLine, Check, Clock3, ImagePlus, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Brand, Note } from './ui';
-import { GuestUploadButton } from './UploadDialog';
+import { GuestUploadButton } from './GuestUploadButton';
 import { UPLOAD_ACCEPT } from '../lib/decode';
 import { guestCollection, guestSession, guestSubmissions } from '../lib/api';
 import { useI18n } from '../lib/i18n';

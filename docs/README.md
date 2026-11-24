@@ -12,6 +12,7 @@
    - [`05-trash.md`](./05-trash.md)：回收站、批量恢复与永久删除顺序。
    - [`06-heic.md`](./06-heic.md)：浏览器端 HEIC 解码与 CSP 约束。
    - [`07-exif-time.md`](./07-exif-time.md)：EXIF 拍摄时间的解析与校验。
+   - [`09-upload-queue.md`](./09-upload-queue.md)：批量上传队列、断点续传、目录句柄与 PWA。
 4. [`screenshots/`](./screenshots/)：README 使用的截图素材与规格说明。
 
 ## 历史档案（迁移前，仅供追溯）

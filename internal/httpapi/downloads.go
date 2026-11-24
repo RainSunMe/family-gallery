@@ -177,6 +177,7 @@ func (a *API) RunWorker(ctx context.Context) {
 			}
 			a.cleanupJobs(ctx)
 			a.purgeTrash(ctx)
+			a.purgeStaleUploads(ctx)
 		}
 	}
 }
@@ -324,6 +325,60 @@ func (a *API) cleanupJobs(ctx context.Context) {
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM download_jobs WHERE expires_at IS NOT NULL AND expires_at<?`, now())
 }
 func placeholders(count int) string { return strings.TrimSuffix(strings.Repeat("?,", count), ",") }
+
+// purgeStaleUploads abandons upload sessions that were started and then
+// forgotten, and frees the bytes they left behind.
+//
+// Without this a 1000-photo batch that the user gave up halfway leaves hundreds
+// of unfinished multipart uploads in the bucket. S3-compatible services bill and
+// account for those parts even though no object exists, so they would accumulate
+// silently until the volume filled up.
+func (a *API) purgeStaleUploads(ctx context.Context) {
+	if a.cfg.StaleUploadRetention <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-a.cfg.StaleUploadRetention).UTC().Format(time.RFC3339)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,original_key,cos_upload_id FROM upload_sessions WHERE status='pending' AND created_at<? LIMIT 50`, cutoff)
+	if err != nil {
+		return
+	}
+	type staleUpload struct{ id, key, multipartID string }
+	items := make([]staleUpload, 0, 8)
+	for rows.Next() {
+		var item staleUpload
+		if err := rows.Scan(&item.id, &item.key, &item.multipartID); err == nil {
+			items = append(items, item)
+		}
+	}
+	rows.Close()
+	for _, item := range items {
+		// Claim first, then free. If the claim loses the race against a
+		// concurrent complete, the objects belong to a real photo and must not
+		// be touched; if it wins, the completion path's own claim fails and it
+		// rolls back instead of inserting a photo with a dangling object.
+		result, err := a.db.ExecContext(ctx, `UPDATE upload_sessions SET status='aborted' WHERE id=? AND status='pending'`, item.id)
+		if err != nil {
+			continue
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+			continue
+		}
+		if item.multipartID != "" {
+			if err := a.store.AbortMultipart(ctx, item.key, item.multipartID); err != nil {
+				a.log.Warn("abort stale multipart failed", "upload_id", item.id, "error", err)
+			}
+		}
+		// A single-PUT upload may have landed the original (and its derivatives)
+		// before the completion request did. DeleteObject succeeds on a missing
+		// key, so this is safe when nothing was transferred.
+		for _, key := range []string{item.key, strings.Replace(item.key, "/originals/", "/thumbs/", 1) + ".webp", strings.Replace(item.key, "/originals/", "/previews/", 1) + ".webp"} {
+			if err := a.store.Delete(ctx, key); err != nil {
+				a.log.Warn("delete stale upload object failed", "upload_id", item.id, "error", err)
+			}
+		}
+	}
+}
+
 func uniqueName(name string, used map[string]int) string {
 	used[name]++
 	if used[name] == 1 {

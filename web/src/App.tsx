@@ -7,7 +7,9 @@ import { AlbumsPage, PhotosPage } from './components/LibraryPages';
 import { CollectionsPage, SharesPage } from './components/SharingPages';
 import { CollectionDetail } from './components/CollectionDetail';
 import { TrashPage } from './components/TrashPage';
+import { UploadQueuePage } from './components/UploadQueue';
 import { GuestCollectionPage } from './components/GuestCollectionPage';
+import { HeaderTitleProvider } from './components/HeaderTitleContext';
 import { Empty } from './components/ui';
 import { guestAlbum, guestPhotos, listAlbums } from './lib/api';
 import type { Album } from './lib/api';
@@ -29,6 +31,10 @@ function CollectionsRoute() { const actions = useFamilyActions(); return <Collec
 function CollectionRoute() { const { collectionID } = collectionDetailRoute.useParams(); const actions = useFamilyActions(); return <CollectionDetail id={collectionID} onToast={actions.onToast} />; }
 function SharesRoute() { const actions = useFamilyActions(); return <SharesPage onToast={actions.onToast} />; }
 function TrashRoute() { const actions = useFamilyActions(); return <TrashPage canPurge={actions.role === 'admin'} onToast={actions.onToast} />; }
+function UploadsRoute() {
+  const actions = useFamilyActions();
+  return <UploadQueuePage onAdd={actions.onUpload} onReattach={actions.onReattach} onToast={actions.onToast} />;
+}
 function GuestShareRoute() {
   const t = useT();
   const { token } = guestShareRoute.useParams();
@@ -37,7 +43,10 @@ function GuestShareRoute() {
   useEffect(() => { guestAlbum(token).then(setAlbum).catch(reason => setError(reason.message)); }, [token]);
   if (error) return <main className="min-h-dvh grid place-items-center p-6"><Empty icon={<Search className="w-8 h-8" />} title={t('guest.shareUnavailable')} description={t('guest.shareUnavailableHint')} /></main>;
   if (!album) return <main className="min-h-dvh grid place-items-center"><LoaderCircle className="w-7 h-7 animate-spin text-accent" /></main>;
-  return <><div className="fixed left-1/2 -translate-x-1/2 top-3 z-20 px-4 py-2 rounded-full bg-surface/80 backdrop-blur-xl border border-line text-xs text-secondary shadow-sm">{t('guest.readOnly')}</div><PhotosPage albumID={album.id} guestToken={token} guestAlbum={() => Promise.resolve(album)} guestPhotos={() => guestPhotos(token, album.id)} /></>;
+  // PhotosPage drives the shared top bar (back/download/share), so it needs the
+  // header provider the family shell would otherwise install. The guest route
+  // sits outside the family layout, hence the provider here.
+  return <HeaderTitleProvider><div className="fixed left-1/2 -translate-x-1/2 top-3 z-20 px-4 py-2 rounded-full bg-surface/80 backdrop-blur-xl border border-line text-xs text-secondary shadow-sm">{t('guest.readOnly')}</div><PhotosPage albumID={album.id} guestToken={token} guestAlbum={() => Promise.resolve(album)} guestPhotos={() => guestPhotos(token, album.id)} /></HeaderTitleProvider>;
 }
 function GuestCollectionRoute() { const { token } = guestCollectionRoute.useParams(); return <GuestCollectionPage token={token} />; }
 
@@ -50,10 +59,11 @@ const collectionsRoute = createRoute({ getParentRoute: () => familyRoute, path: 
 const collectionDetailRoute = createRoute({ getParentRoute: () => familyRoute, path: '/collections/$collectionID', component: CollectionRoute });
 const sharesRoute = createRoute({ getParentRoute: () => familyRoute, path: '/shares', component: SharesRoute });
 const trashRoute = createRoute({ getParentRoute: () => familyRoute, path: '/trash', component: TrashRoute });
+const uploadsRoute = createRoute({ getParentRoute: () => familyRoute, path: '/uploads', component: UploadsRoute });
 const guestCollectionRoute = createRoute({ getParentRoute: () => rootRoute, path: '/guest/collect/$token', component: GuestCollectionRoute });
 const guestShareRoute = createRoute({ getParentRoute: () => rootRoute, path: '/guest/share/$token', component: GuestShareRoute });
 const routeTree = rootRoute.addChildren([
-  familyRoute.addChildren([albumsRoute, albumsIndexRoute, photosRoute, albumDetailRoute, collectionsRoute, collectionDetailRoute, sharesRoute, trashRoute]),
+  familyRoute.addChildren([albumsRoute, albumsIndexRoute, photosRoute, albumDetailRoute, collectionsRoute, collectionDetailRoute, sharesRoute, trashRoute, uploadsRoute]),
   guestCollectionRoute, guestShareRoute,
 ]);
 const router = createRouter({ routeTree });
