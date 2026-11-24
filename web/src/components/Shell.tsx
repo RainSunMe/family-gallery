@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine, Trash2, UploadCloud } from 'lucide-react';
+import { Image, LayoutGrid, Inbox, Link2, FolderPlus, Settings2, Plus, ImagePlus, ArrowLeft, ArrowDownToLine, Trash2, UploadCloud, MoreHorizontal, Pencil } from 'lucide-react';
 import { Brand } from './ui';
 import { DownloadDialog } from './LibraryPages';
 import { ShareDialog } from './SharingPages';
@@ -53,10 +53,12 @@ export function Shell({ children, role, albumCount, queueCount = 0, onUpload, on
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState<Album | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const createRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
   const t = useT();
   const queryClient = useQueryClient();
-  const { title: headerTitle, back, download, share } = useHeaderTitleState();
+  const { title: headerTitle, back, download, share, more } = useHeaderTitleState();
   const active = (to: string) => pathname === to || (to === '/albums' && pathname.startsWith('/albums/')) || (to === '/collections' && pathname.startsWith('/collections/'));
   useEffect(() => {
     const update = () => setScrolled(window.scrollY > 2);
@@ -74,7 +76,23 @@ export function Shell({ children, role, albumCount, queueCount = 0, onUpload, on
     document.addEventListener('keydown', keyboard);
     return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', keyboard); };
   }, [creating]);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (event: PointerEvent) => { if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false); };
+    const keyboard = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); setMoreOpen(false); } };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', keyboard);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', keyboard); };
+  }, [moreOpen]);
+  // An open menu must not survive a navigation: its entries belong to the album
+  // that registered them, not to the page that replaced it.
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
   const create = (action: () => void) => { setCreating(false); action(); };
+  // The page decides what "more" contains, so the menu only exists when the
+  // page put something in it. Album pages add edit/delete; any album page adds
+  // download. Nothing to show means no button at all.
+  const hasMore = !!(download || more.onEdit || more.onDelete);
+  const moreAction = (action?: () => void) => { setMoreOpen(false); action?.(); };
   const openShare = async () => {
     if (!share) return;
     const result = await listAlbums();
@@ -116,7 +134,6 @@ export function Shell({ children, role, albumCount, queueCount = 0, onUpload, on
         </div>
         <div className="flex items-center p-0 topbar-actions">
           {share && <button className="icon-btn plain-action topbar-icon topbar-search" onClick={openShare} aria-label={t('nav.shareAlbum')}><Link2 className="icon" /></button>}
-          {download && <button className="icon-btn plain-action topbar-icon topbar-download" onClick={() => setDownloading(true)} aria-label={t('nav.downloadAlbum')}><ArrowDownToLine className="icon" /></button>}
           {queueCount > 0 && <Link to="/uploads" className="icon-btn plain-action topbar-icon" aria-label={t('queue.activeCount', { count: queueCount })} title={t('queue.activeCount', { count: queueCount })}><UploadCloud className="icon" /></Link>}
           <div className="relative topbar-create" ref={createRef}>
             <button className="icon-btn topbar-icon create-button" onClick={() => setCreating(value => !value)} aria-label={t('nav.create')} aria-expanded={creating} aria-haspopup="menu"><Plus className="icon" /></button>
@@ -126,6 +143,17 @@ export function Shell({ children, role, albumCount, queueCount = 0, onUpload, on
               <button role="menuitem" onClick={() => create(onNewCollection)}><Inbox className="icon" /><span><strong>{t('nav.newCollection')}</strong><small>{t('nav.newCollectionHint')}</small></span></button>
             </div>}
           </div>
+          {hasMore && <div className="relative topbar-more" ref={moreRef}>
+            <button className="icon-btn topbar-icon" onClick={() => setMoreOpen(value => !value)} aria-label={t('nav.more')} aria-expanded={moreOpen} aria-haspopup="menu"><MoreHorizontal className="icon" /></button>
+            {moreOpen && <div className="more-menu" role="menu">
+              {/* Same row anatomy as the create menu: a label plus one line of
+                  explanation, because "delete" here takes the whole album with
+                  it and that is not obvious from two words. Destructive last. */}
+              {more.onEdit && <button role="menuitem" onClick={() => moreAction(more.onEdit)}><Pencil className="icon" /><span><strong>{t('albums.edit')}</strong><small>{t('albums.editHint')}</small></span></button>}
+              {download && <button role="menuitem" onClick={() => moreAction(() => setDownloading(true))}><ArrowDownToLine className="icon" /><span><strong>{t('nav.downloadAlbum')}</strong><small>{t('nav.downloadAlbumHint')}</small></span></button>}
+              {more.onDelete && <button role="menuitem" className="danger" onClick={() => moreAction(more.onDelete)}><Trash2 className="icon" /><span><strong>{t('albums.delete')}</strong><small>{t('albums.deleteHint')}</small></span></button>}
+            </div>}
+          </div>}
         </div>
       </header>
       </div>
@@ -173,6 +201,23 @@ export function Shell({ children, role, albumCount, queueCount = 0, onUpload, on
       .create-menu button:hover{background:color-mix(in srgb,var(--color-ink) 7%,transparent);color:var(--color-ink)}
       .create-menu strong{display:block;font-size:var(--text-secondary);font-weight:500;color:var(--color-ink)}
       .create-menu small{display:block;font-size:var(--text-caption);color:var(--color-muted);margin-top:3px}
+      /* The "more" menu holds plain actions rather than destinations. It shares
+         the create menu's frame and row anatomy — label plus one explanatory
+         line — so the two menus read as the same surface. */
+      .more-menu{position:absolute;right:var(--icon-btn-shift);top:calc(100% + 10px);z-index:45;width:236px;padding:7px;border:1px solid #ffffffb3;border-radius:16px;background:color-mix(in srgb,var(--color-surface) 78%,transparent);box-shadow:0 8px 24px #1b29300f,0 2px 8px #1b293006;backdrop-filter:blur(32px) saturate(190%);-webkit-backdrop-filter:blur(32px) saturate(190%);animation:context-in .16s ease}
+      .dark .more-menu{border-color:#ffffff1f;background:#22262cd9}
+      .more-menu button{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border-radius:10px;text-align:left;color:var(--color-secondary);transition:background .15s}
+      .more-menu button:hover{background:color-mix(in srgb,var(--color-ink) 7%,transparent);color:var(--color-ink)}
+      .more-menu strong{display:block;font-size:var(--text-secondary);font-weight:500;color:var(--color-ink)}
+      .more-menu small{display:block;font-size:var(--text-caption);color:var(--color-muted);margin-top:3px}
+      /* Destructive last, and set apart: a hairline only appears when something
+         sits above it, so a menu whose sole entry is delete has no stray rule. */
+      .more-menu button.danger{position:relative;margin-top:4px}
+      .more-menu button.danger:before{content:'';position:absolute;left:12px;right:12px;top:-4px;height:1px;background:var(--color-line)}
+      .more-menu button.danger strong,.more-menu button.danger .icon{color:#a25142}
+      .more-menu button.danger small{color:color-mix(in srgb,#a25142 62%,var(--color-muted))}
+      .more-menu button.danger:hover{background:color-mix(in srgb,#a25142 10%,transparent)}
+      .more-menu button.danger:hover strong,.more-menu button.danger:hover .icon{color:#a25142}
       @media(min-width:1024px){
         /* The bar used to be absolute inside a zero-height frame, so it scrolled
            away with the page. It is now pinned to the viewport across the whole

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, ArrowUpRight, CalendarRange, FolderPlus, Heart, Image, Images, Link2, LoaderCircle, Package, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
@@ -7,7 +7,7 @@ import type { Album, DownloadJob, Photo } from '../lib/api';
 import { createDownload, getAlbum, getDownload, listAlbums, listPhotos, setAlbumCover, signDownload, updateAlbum } from '../lib/api';
 import { Dialog, Empty, Loading, Note } from './ui';
 import { useLocale, useT } from '../lib/i18n';
-import { usePageTitleScroll, useHeaderBack, useHeaderDownload, useHeaderShare } from './HeaderTitleContext';
+import { usePageTitleScroll, useHeaderBack, useHeaderDownload, useHeaderShare, useHeaderMore } from './HeaderTitleContext';
 import { PhotoGrid, PhotoViewer } from './PhotoGrid';
 
 // Compacts two capture timestamps into one readable range. Photos are stored in
@@ -129,13 +129,18 @@ export function PhotosPage({ albumID, onUpload, onShare, guestToken = '', guestA
       onToast?.(t('albums.coverUpdated'));
     } catch (reason) { onToast?.(reason instanceof Error ? reason.message : t('albums.coverFailed')); }
   };
+  // Edit and delete used to be two buttons beside the title. They now live in the
+  // topbar's "more" menu with download, so there is a single action cluster at
+  // the top right and the heading keeps its full width on a phone.
+  const openEdit = useCallback(() => setEditing(true), []);
+  useHeaderMore({ onEdit: canEditAlbum && album ? openEdit : undefined, onDelete: onDeleteAlbum });
   const albumSaved = async () => {
     setEditing(false);
     await Promise.all([client.invalidateQueries({ queryKey: ['albums'] }), client.invalidateQueries({ queryKey: ['album', albumID] })]);
     onToast?.(t('albums.updated'));
   };
   return <div className="page">
-    <div className="flex items-start sm:items-center justify-between gap-5 mb-7"><div className="min-w-0" ref={titleRef}><h1 className="page-title">{album?.name || t('photos.title')}<span className="text-accent">.</span></h1><p className="page-description">{album?.description || t('photos.description')}</p></div><div className="flex gap-2 shrink-0 pt-3">{canEditAlbum && album && <button className="btn btn-secondary" onClick={() => setEditing(true)}><Pencil className="icon" />{t('albums.edit')}</button>}{onDeleteAlbum && <button className="btn btn-secondary text-[#a25142]" onClick={onDeleteAlbum}><Trash2 className="icon" />{t('albums.delete')}</button>}</div></div>
+    <div className="flex items-start sm:items-center justify-between gap-5 mb-7"><div className="min-w-0" ref={titleRef}><h1 className="page-title">{album?.name || t('photos.title')}<span className="text-accent">.</span></h1><p className="page-description">{album?.description || t('photos.description')}</p></div></div>
     {album && <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted mb-6 -mt-3"><span className="inline-flex items-center gap-1.5"><Image className="w-3.5 h-3.5" />{t('photos.count', { count: album.photo_count })}</span>{takenRange && <span className="inline-flex items-center gap-1.5" title={t('photos.takenRange', { range: takenRange })}><CalendarRange className="w-3.5 h-3.5" />{takenRange}</span>}<span className="inline-flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" />{guestToken ? t('photos.guest') : album.shared ? t('albums.shared') : t('albums.private')}</span></div>}
     {isLoading ? <Loading rows={2} /> : error ? <Empty icon={<Image className="w-8 h-8" />} title={t('photos.loadError')} description={error.message} action={<button className="btn btn-secondary" onClick={() => refetch()}>{t('common.retry')}</button>} /> : photos.length ? <PhotoGrid photos={photos} urls={data?.urls || {}} selecting={selecting} selected={selected} onSelect={select} onStartSelection={startSelection} onOpen={setViewer} onSetCover={canSetCover && albumID ? setCover : undefined} onTrash={canTrash ? photo => onTrash?.([photo.id]) : undefined} /> : <Empty icon={<Image className="w-8 h-8" />} title={t('photos.emptyTitle')} description={albumID ? t('photos.emptyAlbum') : t('photos.emptyAll')} action={onUpload && <button className="btn btn-secondary" onClick={onUpload}><ArrowUpFromLine className="icon" />{t('photos.chooseUpload')}</button>} />}
     {selecting && <div className="selection-bar glass"><span className="text-xs font-medium">{selected.size ? t('photos.selected', { count: selected.size }) : t('photos.select')}</span><button className="text-xs text-accent" onClick={() => setSelected(selected.size === photos.length ? new Set() : new Set(photos.map(photo => photo.id)))}>{selected.size === photos.length ? t('photos.deselectAll') : t('photos.selectAll')}</button><button className="btn btn-primary" disabled={!selected.size} onClick={() => setDownload(true)}><ArrowDownToLine className="icon" />{t('photos.download')}</button>{canTrash && <button className="btn btn-secondary text-[#a25142]" disabled={!selected.size} onClick={() => { onTrash?.([...selected]); finishSelection(); }}><Trash2 className="icon" />{t('photos.trash')}</button>}<button className="icon-btn" onClick={finishSelection} aria-label={t('photos.cancelSelection')}><X className="icon" /></button></div>}
