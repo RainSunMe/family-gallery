@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Download, Info, LoaderCircle, X } from 'luci
 import { createPortal } from 'react-dom';
 import type { Photo } from '../lib/api';
 import { signPhoto } from '../lib/api';
+import { isVideoMime } from '../lib/decode';
 import { useI18n, useT } from '../lib/i18n';
 
 const urlCache = new Map<string, { created: number; request: Promise<string> }>();
@@ -63,6 +64,8 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
   const transitionRef = useRef(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const photo = photos[index];
+  // Videos are played, not zoomed: the controls own every gesture over them.
+  const isVideo = isVideoMime(photo.mime);
   const contributor = contributors?.[photo.id] || photo.contributor || '';
 
   const closeInfo = useCallback(() => {
@@ -171,7 +174,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
 
   useEffect(() => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || isVideo) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = stage.getBoundingClientRect();
@@ -185,19 +188,20 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
     };
     stage.addEventListener('wheel', wheel, { passive: false });
     return () => stage.removeEventListener('wheel', wheel);
-  }, [boundedOffset, updateTransform]);
+  }, [boundedOffset, isVideo, updateTransform]);
 
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); if (showInfo) { closeInfo(); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`.photo-viewer [data-viewer-control="info"]`)?.focus()); } else onClose(); }
       if (event.key === 'ArrowRight') { event.preventDefault(); navigate(index + 1); }
       if (event.key === 'ArrowLeft') { event.preventDefault(); navigate(index - 1); }
-      if (event.key === '+' || event.key === '=') updateTransform(Math.min(6, transformRef.current.scale * 1.4), transformRef.current.offset);
+      if (event.key === '+' || event.key === '=') { if (!isVideo) updateTransform(Math.min(6, transformRef.current.scale * 1.4), transformRef.current.offset); }
       if (event.key === '-') {
+        if (isVideo) return;
         const next = Math.max(1, transformRef.current.scale / 1.4);
         updateTransform(next, next === 1 ? { x: 0, y: 0 } : transformRef.current.offset);
       }
-      if (event.key === '0') resetTransform();
+      if (event.key === '0') { if (!isVideo) resetTransform(); }
       if (event.key === 'Tab') {
         const controls = [...document.querySelectorAll<HTMLButtonElement>('.photo-viewer button:not([disabled])')].filter(control => control.offsetParent !== null);
         const first = controls[0]; const last = controls[controls.length - 1];
@@ -207,7 +211,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
     };
     window.addEventListener('keydown', keyboard, true);
     return () => window.removeEventListener('keydown', keyboard, true);
-  }, [index, navigate, onClose, resetTransform, showInfo, closeInfo, updateTransform]);
+  }, [index, isVideo, navigate, onClose, resetTransform, showInfo, closeInfo, updateTransform]);
 
   function midpoint(points: Point[]) { return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }; }
   function distance(points: Point[]) { return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y); }
@@ -324,7 +328,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
       </div>
       {index > 0 && <button className="viewer-arrow previous" onPointerDown={event => event.stopPropagation()} onClick={() => navigate(index - 1)} aria-label={t('viewer.previous')}><ChevronLeft /></button>}
       {index < photos.length - 1 && <button className="viewer-arrow next" onPointerDown={event => event.stopPropagation()} onClick={() => navigate(index + 1)} aria-label={t('viewer.next')}><ChevronRight /></button>}
-      <div className="viewer-hint" aria-hidden="true">{scale > 1 ? t('viewer.hintZoom') : t('viewer.hintSwipe')}</div>
+      <div className="viewer-hint" aria-hidden="true">{isVideo ? t('viewer.hintVideo') : scale > 1 ? t('viewer.hintZoom') : t('viewer.hintSwipe')}</div>
     </div>
     {showInfo && <div className={`viewer-info-layer ${closingInfo ? 'is-closing' : ''}`} onClick={closeInfo}>
       <aside className={`viewer-info ${sheetDragging ? 'is-dragging' : ''}`} role="dialog" aria-modal="true" aria-label={t('viewer.infoDialog')} onClick={event => event.stopPropagation()} style={{ transform: sheetDrag ? `translateY(${sheetDrag}px)` : undefined }}>
@@ -338,7 +342,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, guestToken = '', co
         <dl>
           <div><dt>{t('viewer.fileName')}</dt><dd>{photo.name}</dd></div>
           <div><dt>{t('viewer.dimensions')}</dt><dd>{t('viewer.pixels', { width: photo.width, height: photo.height })}</dd></div>
-          <div><dt>{t('viewer.format')}</dt><dd>{photo.mime.replace('image/', '').toUpperCase()}</dd></div>
+          <div><dt>{t('viewer.format')}</dt><dd>{photo.mime.replace(/^(?:image|video)\//, '').toUpperCase()}</dd></div>
           <div><dt>{t('viewer.fileSize')}</dt><dd>{photo.size >= 1024 * 1024 ? `${(photo.size / 1024 / 1024).toFixed(2)} MB` : `${Math.max(1, Math.round(photo.size / 1024))} KB`}</dd></div>
           <div><dt>{t('viewer.takenAt')}</dt><dd>{new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(photo.taken_at))}</dd></div>
           <div><dt>{t('viewer.position')}</dt><dd>{t('viewer.positionValue', { index: index + 1, total: photos.length })}</dd></div>
@@ -357,16 +361,30 @@ function ViewerBackdrop({ photo, guestToken }: { photo: Photo; guestToken: strin
 }
 function ViewerImage({ photo, guestToken, active, scale, offset }: { photo: Photo; guestToken: string; active: boolean; scale: number; offset: Offset }) {
   const t = useT();
+  const [videoFailed, setVideoFailed] = useState(false);
   // A HEIC original only renders in browsers that can decode it, so the viewer
   // uses the WebP preview for those and keeps the original for the download
   // button. Preferring the original would show a broken image in Chrome.
-  const heic = /hei[cf]/i.test(photo.mime);
+  const video = isVideoMime(photo.mime);
+  const heic = !video && /hei[cf]/i.test(photo.mime);
   const original = useSignedURL(photo.id, heic ? 'preview' : 'original', guestToken);
   const preview = useSignedURL(photo.id, 'preview', guestToken);
   const url = original.url || preview.url;
-  return <div className="viewer-image-wrap" style={{ transform: `translate3d(${offset.x}px,${offset.y}px,0) scale(${scale})` }}>
+  // The player's controls live inside the video element, so gestures over it
+  // must not reach the swipe/zoom handler on the stage.
+  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+  return <div className="viewer-image-wrap" style={video ? undefined : { transform: `translate3d(${offset.x}px,${offset.y}px,0) scale(${scale})` }}>
     {!original.url && !original.failed && active && <span className="viewer-loading"><LoaderCircle className="icon animate-spin" />{t('viewer.loading')}</span>}
-    {url ? <img className="viewer-image" src={url} alt={photo.name} draggable={false} /> : original.failed && preview.failed ? <span className="text-xs text-white/65">{t('viewer.loadFailed')}</span> : null}
+    {video
+      ? original.url
+        ? <>
+            <video className="viewer-video" src={original.url} poster={preview.url || undefined} controls playsInline preload="metadata"
+              onError={() => setVideoFailed(true)}
+              onPointerDown={stop} onPointerMove={stop} onPointerUp={stop} onPointerCancel={stop} onDoubleClick={stop} />
+            {videoFailed && <span className="viewer-video-note">{t('viewer.videoUnsupported')}</span>}
+          </>
+        : original.failed ? <span className="text-xs text-white/65">{t('viewer.loadFailed')}</span> : null
+      : url ? <img className="viewer-image" src={url} alt={photo.name} draggable={false} /> : original.failed && preview.failed ? <span className="text-xs text-white/65">{t('viewer.loadFailed')}</span> : null}
   </div>;
 }
 function ViewerThumb({ id, guestToken }: { id: string; guestToken: string }) {

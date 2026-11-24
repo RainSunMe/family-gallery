@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DirectorySource, FileListSource, entryKey, isPreviewableName } from './source';
+import { DirectorySource, FileListSource, entryKey, isPreviewableName, isVideoName } from './source';
 
 /**
  * A fake `FileSystemDirectoryHandle`. The real one can only be produced by a
@@ -53,6 +53,17 @@ describe('DirectorySource', () => {
     ]));
     const entries = await source.list();
     expect(entries.map(entry => entry.path)).toEqual(['keep.png']);
+  });
+
+  it('keeps MP4 videos alongside photos', async () => {
+    const source = new DirectorySource(handle([
+      photo('clip.mp4'),
+      { dir: 'DCIM', children: [photo('IMG_0002.MP4'), photo('a.mov')] },
+    ]));
+    const entries = await source.list();
+    expect(entries.map(entry => entry.path)).toEqual(['clip.mp4', 'DCIM/IMG_0002.MP4']);
+    expect(isVideoName(entries[0].name)).toBe(true);
+    expect(isVideoName(entries[1].name)).toBe(true);
   });
 
   it('keeps two same-named files from different folders apart', async () => {

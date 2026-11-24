@@ -18,13 +18,13 @@ describe('entryKey', () => {
 
 describe('isSupportedName', () => {
   it('accepts the formats the pipeline can decode', () => {
-    for (const name of ['a.jpg', 'B.JPEG', 'c.png', 'd.webp', 'e.gif', 'f.heic', 'g.HEIF']) {
+    for (const name of ['a.jpg', 'B.JPEG', 'c.png', 'd.webp', 'e.gif', 'f.heic', 'g.HEIF', 'h.mp4']) {
       expect(isSupportedName(name)).toBe(true);
     }
   });
 
   it('rejects everything else', () => {
-    for (const name of ['a.mp4', 'b.txt', 'no-extension', 'c.heic.bak']) {
+    for (const name of ['a.mov', 'b.txt', 'no-extension', 'c.heic.bak']) {
       expect(isSupportedName(name)).toBe(false);
     }
   });

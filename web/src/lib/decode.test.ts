@@ -37,6 +37,8 @@ describe('resolveMime', () => {
     expect(resolveMime(file('x.JPG', ''))).toBe('image/jpeg');
     expect(resolveMime(file('x.webp', ''))).toBe('image/webp');
     expect(resolveMime(file('x.gif', ''))).toBe('image/gif');
+    expect(resolveMime(file('x.mp4', ''))).toBe('video/mp4');
+    expect(resolveMime(file('x.MP4', ''))).toBe('video/mp4');
   });
 
   it('returns an empty string for an unknown file', () => {
@@ -50,6 +52,6 @@ describe('upload accept list', () => {
     // A picker that greys out a real photo is worse than one that shows extras,
     // and platforms disagree about the MIME type of .heic.
     for (const mime of SUPPORTED_MIME) expect(UPLOAD_ACCEPT).toContain(mime);
-    for (const ext of ['.heic', '.heif', '.jpg', '.png', '.webp', '.gif']) expect(UPLOAD_ACCEPT).toContain(ext);
+    for (const ext of ['.heic', '.heif', '.jpg', '.png', '.webp', '.gif', '.mp4']) expect(UPLOAD_ACCEPT).toContain(ext);
   });
 });

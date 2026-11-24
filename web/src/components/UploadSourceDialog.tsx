@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { FileImage, FolderOpen, ImagePlus, LoaderCircle, UploadCloud } from 'lucide-react';
+import { FileImage, Film, FolderOpen, ImagePlus, LoaderCircle, UploadCloud } from 'lucide-react';
 import { Dialog, Note, Select } from './ui';
 import { formatSize } from '../lib/api';
 import type { Album } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { UPLOAD_ACCEPT } from '../lib/decode';
-import { canPickDirectory, DirectorySource, FileListSource, isPreviewableName, pickDirectory, type SourceEntry, type UploadSource } from '../lib/queue/source';
+import { canPickDirectory, DirectorySource, FileListSource, isPreviewableName, isVideoName, pickDirectory, type SourceEntry, type UploadSource } from '../lib/queue/source';
 import { enqueue, mobileLimit } from '../lib/queue/runner';
 
 /** Rows painted at once; a 4000-photo folder still has to open in a blink. */
@@ -245,9 +245,12 @@ export function UploadSourceDialog({ albums, initialAlbum, onClose, onQueued }: 
 function Thumb({ entry, open }: { entry: SourceEntry; open: (entry: SourceEntry) => Promise<File> }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [url, setUrl] = useState('');
+  // A video has no `<img>` representation; extracting a frame for every row
+  // would decode hundreds of clips just to populate a list.
+  const video = isVideoName(entry.name);
 
   useEffect(() => {
-    if (!isPreviewableName(entry.name) || typeof IntersectionObserver !== 'function') return;
+    if (video || !isPreviewableName(entry.name) || typeof IntersectionObserver !== 'function') return;
     const node = ref.current;
     if (!node) return;
     let cancelled = false;
@@ -267,9 +270,9 @@ function Thumb({ entry, open }: { entry: SourceEntry; open: (entry: SourceEntry)
       observer.disconnect();
       if (created) URL.revokeObjectURL(created);
     };
-  }, [entry, open]);
+  }, [entry, open, video]);
 
   return <span ref={ref} className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md bg-soft text-muted">
-    {url ? <img src={url} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setUrl('')} /> : <FileImage className="h-4 w-4" />}
+    {video ? <Film className="h-4 w-4" /> : url ? <img src={url} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setUrl('')} /> : <FileImage className="h-4 w-4" />}
   </span>;
 }

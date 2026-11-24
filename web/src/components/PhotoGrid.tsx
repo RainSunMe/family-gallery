@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, CheckSquare2, ImageIcon, ImageOff, Trash2 } from 'lucide-react';
+import { Check, CheckSquare2, ImageIcon, ImageOff, Play, Trash2 } from 'lucide-react';
 import type { Photo } from '../lib/api';
 import { formatDate } from '../lib/api';
 import { useT } from '../lib/i18n';
@@ -53,6 +53,7 @@ export function PhotoGrid({ photos, urls, selecting, selected, onSelect, onStart
       aria-label={t('grid.ariaPhoto', { action: selecting ? t('grid.actionSelect') : t('grid.actionView'), name: photo.name })}
       aria-pressed={selecting ? selected.has(photo.id) : undefined}>
       {urls[photo.id] ? <img src={urls[photo.id]} alt={photo.name} loading="lazy" draggable={false} /> : <span className="photo-fallback"><ImageOff className="icon" /></span>}
+      {photo.mime.startsWith('video/') && <span className="photo-video-badge" aria-hidden="true"><Play className="icon" fill="currentColor" /></span>}
       {photo.contributor && <span className="photo-contributor" title={t('grid.uploadedBy', { name: photo.contributor })}>{photo.contributor}</span>}
       <span className="photo-select-mask" aria-hidden="true" />
       <span className="photo-check"><Check /></span>

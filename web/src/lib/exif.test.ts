@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { readCaptureTime } from './exif';
+import { readCaptureTime, captureTimeOf } from './exif';
 
 // A real 64x48 JPEG written by Pillow with DateTimeOriginal set to
 // 2026:08:03 10:11:12. Pillow writes a big-endian TIFF block, which also covers
@@ -117,5 +117,49 @@ describe('readCaptureTime', () => {
   it('survives a truncated block without throwing', () => {
     const tiff = buildTiff({});
     expect(() => readCaptureTime(tiff.slice(0, 12))).not.toThrow();
+  });
+});
+
+/** Minimal `ftyp` + `moov/mvhd` pair, which is all the MP4 reader looks at. */
+function buildMp4(createdSeconds: number): Uint8Array<ArrayBuffer> {
+  const box = (type: string, payload: Uint8Array): Uint8Array<ArrayBuffer> => {
+    const out = new Uint8Array(8 + payload.length);
+    new DataView(out.buffer).setUint32(0, out.length, false);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(payload, 8);
+    return out;
+  };
+  const mvhd = new Uint8Array(100);
+  const view = new DataView(mvhd.buffer);
+  view.setUint8(0, 0); // version 0, flags 0
+  view.setUint32(4, createdSeconds, false);
+  view.setUint32(8, createdSeconds, false);
+  view.setUint32(12, 1000, false); // timescale
+  view.setUint32(16, 5000, false); // duration
+  const ftyp = box('ftyp', new TextEncoder().encode('isom\0\0\0\0'));
+  const moov = box('moov', box('mvhd', mvhd));
+  const out = new Uint8Array(ftyp.length + moov.length);
+  out.set(ftyp);
+  out.set(moov, ftyp.length);
+  return out;
+}
+
+describe('captureTimeOf', () => {
+  it('reads the creation time from an MP4 moov/mvhd box', async () => {
+    const seconds = 1700000000;
+    const file = new File([buildMp4(seconds)], 'clip.mp4', { type: 'video/mp4' });
+    const expected = new Date(Date.UTC(1904, 0, 1) + seconds * 1000).toISOString();
+    expect(await captureTimeOf(file)).toBe(expected);
+  });
+
+  it('falls back to the modification time when the container has no header', async () => {
+    const mtime = Date.UTC(2024, 5, 1, 12, 0, 0);
+    const file = new File([new Uint8Array(64)], 'clip.mp4', { type: 'video/mp4', lastModified: mtime });
+    expect(await captureTimeOf(file)).toBe(new Date(mtime).toISOString());
+  });
+
+  it('returns null for a photo without metadata', async () => {
+    const file = new File([new Uint8Array(64)], 'photo.jpg', { type: 'image/jpeg' });
+    expect(await captureTimeOf(file)).toBeNull();
   });
 });

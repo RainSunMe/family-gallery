@@ -25,17 +25,36 @@ export function resolveMime(file: File): string {
   if (ext === 'png') return 'image/png';
   if (ext === 'webp') return 'image/webp';
   if (ext === 'gif') return 'image/gif';
+  if (ext === 'mp4') return 'video/mp4';
   return '';
 }
 
-export const SUPPORTED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+export const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+
+/**
+ * Only MP4 (H.264/AAC) is on the list. The server accepts the container, but a
+ * browser can only play it when the codecs are the ones every platform ships;
+ * anything else is rejected at upload time instead of being stored unplayable.
+ */
+export const VIDEO_MIME = ['video/mp4'];
+
+export const SUPPORTED_MIME = [...IMAGE_MIME, ...VIDEO_MIME];
+
+/** Media type checks. Kept here so no caller re-implements the prefix test. */
+export function isVideoMime(mime: string): boolean {
+  return /^video\//i.test(mime);
+}
+
+export function isImageMime(mime: string): boolean {
+  return /^image\//i.test(mime);
+}
 
 /**
  * The `accept` attribute for file pickers. Extensions are listed alongside the
  * MIME types because macOS and Windows disagree about the MIME of .heic, and a
  * picker that silently hides a file is worse than one that shows too much.
  */
-export const UPLOAD_ACCEPT = [...SUPPORTED_MIME, '.heic', '.heif', '.jpg', '.jpeg', '.png', '.webp', '.gif'].join(',');
+export const UPLOAD_ACCEPT = [...SUPPORTED_MIME, '.heic', '.heif', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4'].join(',');
 
 /** Everything the rest of the app needs from a decoded file. */
 export type Decoded = {
@@ -105,8 +124,11 @@ export async function decodeImage(file: File): Promise<Decoded> {
   }
 }
 
+/** Anything with pixels and a size: an image bitmap, a HEIC canvas or a video frame. */
+export type PixelSource = { source: CanvasImageSource; width: number; height: number };
+
 /** Downscale a decoded image to a WebP blob whose longest side is `max`. */
-export async function resizeToWebp(decoded: Decoded, max: number, quality = 0.84): Promise<Blob> {
+export async function resizeToWebp(decoded: PixelSource, max: number, quality = 0.84): Promise<Blob> {
   const scale = Math.min(1, max / Math.max(decoded.width, decoded.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(decoded.width * scale));
@@ -114,7 +136,82 @@ export async function resizeToWebp(decoded: Decoded, max: number, quality = 0.84
   const context = canvas.getContext('2d');
   if (!context) throw new Error(translate(currentLocale(), 'upload.previewUnsupported'));
   context.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
+  return canvasToBlob(canvas, 'image/webp', quality);
+}
+
+/** `canvas.toBlob` with a rejected promise instead of a null result. */
+export function canvasToBlob(canvas: HTMLCanvasElement, mime = 'image/webp', quality = 0.84): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(translate(currentLocale(), 'upload.previewFailed'))), 'image/webp', quality);
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(translate(currentLocale(), 'upload.previewFailed'))), mime, quality);
   });
+}
+
+/** A frame pulled out of a video: painted pixels plus the clip's own dimensions. */
+export type VideoFrame = { source: HTMLCanvasElement; width: number; height: number };
+
+function waitForMediaEvent(video: HTMLVideoElement, event: string, timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeEventListener(event, ok);
+      video.removeEventListener('error', fail);
+      if (error) reject(error); else resolve();
+    };
+    const ok = () => finish();
+    const fail = () => finish(new Error(translate(currentLocale(), 'upload.videoUnreadable')));
+    // A network-backed file would never be slow, but a 3 GB clip on a phone can
+    // take a while before the first frame is decodable.
+    const timer = setTimeout(fail, timeout);
+    video.addEventListener(event, ok);
+    video.addEventListener('error', fail);
+  });
+}
+
+/**
+ * Paint a frame of a video onto a canvas.
+ *
+ * This is the video equivalent of `decodeImage`: the pipeline only ever needs
+ * one still, and painting it here means the thumbnail and the preview are
+ * produced by exactly the same code path as a photo. `maxEdge` bounds the
+ * canvas, never the reported width/height, which stay the clip's real size so
+ * the viewer can keep the aspect ratio right.
+ */
+export async function decodeVideoFrame(file: File, maxEdge = 0): Promise<VideoFrame> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.preload = 'auto';
+  video.muted = true;
+  video.playsInline = true;
+  video.src = url;
+  try {
+    video.load();
+    await waitForMediaEvent(video, 'loadeddata', 20000);
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    if (!width || !height) throw new Error(translate(currentLocale(), 'upload.videoUnreadable'));
+    // The first keyframe is often black; a hair into the clip makes a better
+    // cover without materially changing what the video is.
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (duration > 0.2) {
+      video.currentTime = Math.min(0.25, duration / 10);
+      await waitForMediaEvent(video, 'seeked', 20000);
+    }
+    const scale = maxEdge > 0 ? Math.min(1, maxEdge / Math.max(width, height)) : 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error(translate(currentLocale(), 'upload.previewUnsupported'));
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return { source: canvas, width, height };
+  } finally {
+    // Dropping the source is what releases the decoder; revoking the URL alone
+    // leaves the media element holding the file.
+    video.removeAttribute('src');
+    video.load();
+    URL.revokeObjectURL(url);
+  }
 }

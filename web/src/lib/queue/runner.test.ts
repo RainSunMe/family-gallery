@@ -39,6 +39,9 @@ vi.mock('../exif', () => ({ captureTimeOf: mocks.captureTimeOf }));
 vi.mock('../decode', () => ({
   resolveMime: () => 'image/jpeg',
   SUPPORTED_MIME: ['image/jpeg'],
+  isVideoMime: () => false,
+  decodeVideoFrame: vi.fn(),
+  canvasToBlob: vi.fn(),
 }));
 
 import { resetMemory, getRecord, getQueue, getCompletedTick } from './store';

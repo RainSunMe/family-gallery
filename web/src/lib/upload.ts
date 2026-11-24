@@ -3,7 +3,7 @@ import { api } from './api';
 import type { DuplicateCheck, UploadGrant } from './api';
 import { getDisplayName } from './identity';
 import { captureTimeOf } from './exif';
-import { decodeImage, resolveMime, resizeToWebp, SUPPORTED_MIME } from './decode';
+import { decodeImage, decodeVideoFrame, isVideoMime, resolveMime, resizeToWebp, SUPPORTED_MIME } from './decode';
 
 const t = (key: string, vars?: Record<string, string | number>) => translate(currentLocale(), key, vars);
 
@@ -25,10 +25,22 @@ export async function checkDuplicates(albumID: string, hashes: string[]): Promis
 /**
  * Decode once, produce both sizes. The caller owns the blobs, which is what lets
  * the queue rebuild its own state and re-derive only on a fresh attempt.
+ *
+ * A video has no bitmap to decode: its cover is a frame painted onto a canvas,
+ * so it goes through the same downscale step and lands in the bucket as the
+ * same WebP pair a photo produces. No transcoding happens here — the original
+ * MP4 is what the viewer plays.
  */
 export async function buildDerivatives(file: File): Promise<DerivativeBlobs> {
   // One decode, two sizes. Decoding per size meant a HEIC file was decoded twice,
   // which is the expensive part.
+  if (isVideoMime(resolveMime(file))) {
+    // A 4K frame painted at full size would cost ~33 MB of canvas for pixels
+    // that are immediately downscaled, so the cover is bounded here.
+    const frame = await decodeVideoFrame(file, 1600);
+    const [thumb, preview] = await Promise.all([resizeToWebp(frame, 480), resizeToWebp(frame, 1600)]);
+    return { width: frame.width, height: frame.height, thumb, preview };
+  }
   const decoded = await decodeImage(file);
   try {
     const [thumb, preview] = await Promise.all([resizeToWebp(decoded, 480), resizeToWebp(decoded, 1600)]);

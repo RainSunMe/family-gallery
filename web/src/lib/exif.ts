@@ -17,7 +17,7 @@ const TAG_DATE_TIME_DIGITIZED = 0x9004;
 const TAG_DATE_TIME = 0x0132;
 
 // Scanning stops here. An Exif block that far into the file is not worth the
-// walk, and this keeps a 200 MiB video from stalling the tab.
+// walk, and this keeps a large video from stalling the tab.
 const SCAN_LIMIT = 4 * 1024 * 1024;
 
 /** Locate the TIFF header inside the raw bytes. */
@@ -179,8 +179,14 @@ export function readCaptureTime(bytes: Uint8Array): Date | null {
 export async function captureTimeOf(file: File): Promise<string | null> {
   try {
     const head = new Uint8Array(await file.slice(0, SCAN_LIMIT).arrayBuffer());
-    const date = readCaptureTime(head);
-    if (!date) return null;
+    // EXIF first: an MP4 can carry an Exif item too, and it is the more precise
+    // source when present. Otherwise fall back to the container's own header.
+    let date = readCaptureTime(head) ?? readMp4CaptureTime(head);
+    // Cameras write mdat before moov on many phones, which puts the header past
+    // SCAN_LIMIT. A video's modification time is a good stand-in there, and it
+    // is still far better for sorting than the upload time.
+    if (!date && looksLikeVideo(file)) date = new Date(file.lastModified);
+    if (!date || Number.isNaN(date.getTime())) return null;
     // Guard against clocks set wildly wrong; a capture date in the future would
     // sort above everything else in the album.
     const now = Date.now();
@@ -189,4 +195,72 @@ export async function captureTimeOf(file: File): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function looksLikeVideo(file: File): boolean {
+  if (/^video\//i.test(file.type)) return true;
+  return /\.mp4$/i.test(file.name);
+}
+
+// ---------------------------------------------------------------------------
+// MP4 capture time
+//
+// A video's date lives in `moov/mvhd`, not in EXIF. The value counts seconds
+// from 1904-01-01 UTC, which is why it can be converted straight to ISO without
+// the local-time dance the JPEG path needs. Readers stop at the same size limit
+// as the rest of this file, so a `moov` at the end of a huge file is simply not
+// found and the upload falls back to its arrival time.
+// ---------------------------------------------------------------------------
+
+const MP4_EPOCH = Date.UTC(1904, 0, 1);
+
+function boxType(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+}
+
+/** Locate the first child box of `type` in [start, end). */
+function findBox(bytes: Uint8Array, start: number, end: number, type: string): { payload: number; end: number } | null {
+  let offset = start;
+  while (offset + 8 <= end) {
+    let size = ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+    const kind = boxType(bytes, offset + 4);
+    if (size === 1) {
+      // The 64-bit size form is only used by boxes over 4 GiB, but must be
+      // skipped correctly to keep the chain in sync.
+      if (offset + 16 > end) return null;
+      const high = ((bytes[offset + 8] << 24) | (bytes[offset + 9] << 16) | (bytes[offset + 10] << 8) | bytes[offset + 11]) >>> 0;
+      const low = ((bytes[offset + 12] << 24) | (bytes[offset + 13] << 16) | (bytes[offset + 14] << 8) | bytes[offset + 15]) >>> 0;
+      size = high * 0x100000000 + low;
+    } else if (size === 0) {
+      size = end - offset; // "extends to the end of the file"
+    }
+    if (size < 8 || offset + size > end) return null;
+    if (kind === type) return { payload: offset + 8, end: offset + size };
+    offset += size;
+  }
+  return null;
+}
+
+function readMp4CaptureTime(bytes: Uint8Array): Date | null {
+  const moov = findBox(bytes, 0, bytes.length, 'moov');
+  if (!moov) return null;
+  const mvhd = findBox(bytes, moov.payload, moov.end, 'mvhd');
+  if (!mvhd) return null;
+  const version = bytes[mvhd.payload];
+  // version + flags occupy four bytes before the time fields.
+  const base = mvhd.payload + 4;
+  let seconds: number;
+  if (version === 1) {
+    if (base + 8 > mvhd.end) return null;
+    const high = ((bytes[base] << 24) | (bytes[base + 1] << 16) | (bytes[base + 2] << 8) | bytes[base + 3]) >>> 0;
+    const low = ((bytes[base + 4] << 24) | (bytes[base + 5] << 16) | (bytes[base + 6] << 8) | bytes[base + 7]) >>> 0;
+    seconds = high * 0x100000000 + low;
+  } else {
+    if (base + 4 > mvhd.end) return null;
+    seconds = ((bytes[base] << 24) | (bytes[base + 1] << 16) | (bytes[base + 2] << 8) | bytes[base + 3]) >>> 0;
+  }
+  // Zero means "not set", and 1904 dates are not real recordings.
+  if (seconds <= 0) return null;
+  const date = new Date(MP4_EPOCH + seconds * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

@@ -30,10 +30,13 @@ type DirectoryEntry = FileEntry | DirectoryHandle;
 
 type PickerWindow = Window & { showDirectoryPicker?: (options?: { id?: string; mode?: 'read' }) => Promise<DirectoryHandle> };
 
-export const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'];
+export const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'mp4'];
 
 /** Formats the browser can paint in a thumbnail without decoding through wasm. */
 const PREVIEWABLE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+/** Video needs a decoder that pulls a frame, not an `<img>`. */
+const VIDEO_EXTENSIONS = ['mp4'];
 
 /** A folder walk is stopped at these limits so a huge library cannot freeze the tab. */
 const MAX_ENTRIES = 4000;
@@ -86,6 +89,12 @@ export function isSupportedName(name: string): boolean {
 export function isPreviewableName(name: string): boolean {
   const extension = name.split('.').pop()?.toLowerCase() || '';
   return PREVIEWABLE_EXTENSIONS.includes(extension);
+}
+
+/** Whether the walk found a video rather than a photo. */
+export function isVideoName(name: string): boolean {
+  const extension = name.split('.').pop()?.toLowerCase() || '';
+  return VIDEO_EXTENSIONS.includes(extension);
 }
 
 function shouldDescend(name: string): boolean {
@@ -233,7 +242,7 @@ export function pickFilesDialog(): Promise<File[]> {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = [...SUPPORTED_EXTENSIONS.map(extension => `.${extension}`), 'image/*'].join(',');
+    input.accept = [...SUPPORTED_EXTENSIONS.map(extension => `.${extension}`), 'image/*', 'video/mp4'].join(',');
     // `cancel` is not universally supported, so the promise may simply never
     // settle when the user dismisses the picker. Nothing is leaked by that.
     input.addEventListener('change', () => resolve(Array.from(input.files || [])));

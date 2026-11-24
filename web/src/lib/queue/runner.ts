@@ -13,7 +13,7 @@ import type { ExistingPhoto, UploadGrant } from '../api';
 import { uploadParts as listServerParts, resignUpload, pendingUploads } from '../api';
 import { checkDuplicates, buildDerivatives, createSession, sendOriginal, sendDerivatives, completeSession } from '../upload';
 import type { DerivativeBlobs, TransferredPart } from '../upload';
-import { resolveMime, SUPPORTED_MIME } from '../decode';
+import { canvasToBlob, decodeVideoFrame, isVideoMime, resolveMime, SUPPORTED_MIME } from '../decode';
 import { captureTimeOf } from '../exif';
 import { hashOne } from '../hash';
 import { translate, currentLocale } from '../i18n';
@@ -372,8 +372,17 @@ export async function previewUrl(record: QueueRecord): Promise<string | null> {
   if (!entry) return null;
   try {
     const file = await session.source.open(entry);
-    if (!PAINTABLE.includes(file.type.toLowerCase())) return null;
-    const url = URL.createObjectURL(file);
+    const mime = resolveMime(file);
+    let url: string;
+    if (isVideoMime(mime)) {
+      // An `<img>` cannot paint an mp4, so the row gets a still frame instead.
+      // The bound is small on purpose: this is a 36px thumbnail.
+      const frame = await decodeVideoFrame(file, 320);
+      url = URL.createObjectURL(await canvasToBlob(frame.source, 'image/webp', 0.72));
+    } else {
+      if (!PAINTABLE.includes(mime)) return null;
+      url = URL.createObjectURL(file);
+    }
     previews.set(record.id, url);
     return url;
   } catch {
