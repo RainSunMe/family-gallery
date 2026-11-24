@@ -30,6 +30,7 @@ The whole interface is bilingual (English and Simplified Chinese). `DEFAULT_LANG
 - [Configuration](#configuration)
 - [Object storage requirements](#object-storage-requirements)
 - [HEIC photos](#heic-photos)
+- [Videos](#videos)
 - [Capture time](#capture-time)
 - [Architecture](#architecture)
 - [Development and tests](#development-and-tests)
@@ -288,12 +289,29 @@ Originals are never transcoded. The viewer shows the WebP preview for HEIC
 because Chromium cannot render the original, and the download button still hands
 back the untouched HEIC file.
 
+## Videos
+
+MP4 (H.264/AAC) is accepted. Like a photo, the original goes straight to the
+bucket with a presigned PUT and is stored byte-identical — there is no
+transcoding step and no separate video pipeline.
+
+Thumbnail and preview are produced in the browser: it seeks a fraction of a
+second into the clip, paints that frame onto a canvas, and downscales it into the
+same WebP pair a photo produces. The grid marks a video with a play badge, and
+the viewer plays the original with native controls over that frame as the poster.
+
+Only MP4 is on the list. Other containers and codecs are rejected at upload
+rather than stored unplayable, and a clip the browser cannot decode shows a note
+pointing at the download instead of a broken player.
+
 ## Capture time
 
-Photos are sorted and grouped by **when they were taken**, read from the EXIF
-`DateTimeOriginal` tag in the browser. EXIF stores a wall-clock time with no
-offset, so it is interpreted in the uploader's own time zone and converted to UTC
-before it is sent. Files without a usable timestamp fall back to the upload time.
+Photos and videos are sorted and grouped by **when they were taken**. A photo's
+time comes from the EXIF `DateTimeOriginal` tag; a video's from the `moov/mvhd`
+box, falling back to the file's modification time because phones often write the
+media data before the index. EXIF stores a wall-clock time with no offset, so it
+is interpreted in the uploader's own time zone and converted to UTC before it is
+sent. Files without a usable timestamp fall back to the upload time.
 
 Photos uploaded before this existed keep their old timestamps; nothing is
 rewritten retroactively.
@@ -343,7 +361,7 @@ change has to respect. The full cycle from local checks to a published image is 
 
 ## Current limitations
 
-- JPEG, PNG, WebP, GIF and HEIC are supported. HEIC is decoded in the browser: Safari decodes it natively, everything else loads a WebAssembly build of libheif on first use. Video has no preview pipeline.
+- JPEG, PNG, WebP, GIF, HEIC and MP4 are supported. HEIC is decoded in the browser: Safari decodes it natively, everything else loads a WebAssembly build of libheif on first use. Video is accepted as MP4 (H.264/AAC) only: the original is stored untouched, and the thumbnail and preview are a frame pulled from the clip in the browser. Nothing is transcoded, so a codec the browser cannot play is rejected at upload rather than stored unplayable.
 - The viewer shows the WebP preview for HEIC because browsers other than Safari cannot render the original. The original file is stored untouched and still downloads as HEIC.
 - Duplicate detection compares exact bytes within one album. The same picture re-encoded or exported from HEIC counts as a different file, and the same file added to two albums is stored twice.
 - Deleting moves photos to a trash that is emptied after `TRASH_RETENTION`. There is no per-photo history, so "who deleted this" is only as trustworthy as the name typed into that browser.
