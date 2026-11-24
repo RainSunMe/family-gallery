@@ -2,7 +2,7 @@
 
 Guidance for coding agents working in this repository. Read this before changing
 code. The release procedure lives in
-[docs/09-release-workflow.md](./docs/09-release-workflow.md).
+[docs/08-release-workflow.md](./docs/08-release-workflow.md).
 
 ## What this project is
 
@@ -89,7 +89,8 @@ so do not use them for authorization.
 | `internal/storage` | Generic S3 adapter: signing, multipart, HEAD, Copy, Delete |
 | `web/src/lib` | API client, i18n, hashing, decoding, identity |
 | `web/src/components` | Pages and dialogs |
-| `docs/05..09` | Design notes: dedup, trash, HEIC, EXIF time, release workflow |
+| `docs/04..08` | Design notes: dedup, trash, HEIC, EXIF time, release workflow |
+| `docs/01..03` | Historical archive (PRD, pre-Garage design) — not current config |
 
 Design notes explain the trade-offs and the approaches that were rejected. Read
 the relevant one before reworking an area, so a settled decision is not reopened

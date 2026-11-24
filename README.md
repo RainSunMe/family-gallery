@@ -231,7 +231,7 @@ back out of the bucket to hash it, which is why it is off by default. Photos
 uploaded before dedup stays unhashed until you do, and the dialog says how many
 of those an album holds.
 
-See [docs/05-photo-dedup.md](./docs/05-photo-dedup.md) for the full design.
+See [docs/04-photo-dedup.md](./docs/04-photo-dedup.md) for the full design.
 
 #### Trash
 
@@ -245,7 +245,7 @@ retention window passes. A toast offers undo for eight seconds, and the trash pa
 can restore anything still in it. Restoring a photo whose album was also deleted
 brings the album back too.
 
-See [docs/06-trash.md](./docs/06-trash.md) for the full design.
+See [docs/05-trash.md](./docs/05-trash.md) for the full design.
 
 ## Object storage requirements
 
@@ -285,12 +285,12 @@ before it is sent. Files without a usable timestamp fall back to the upload time
 Photos uploaded before this existed keep their old timestamps; nothing is
 rewritten retroactively.
 
-See [docs/08-exif-time.md](./docs/08-exif-time.md) for the parser and its limits.
+See [docs/07-exif-time.md](./docs/07-exif-time.md) for the parser and its limits.
 
 The Content-Security-Policy includes `'wasm-unsafe-eval'`, which allows
 WebAssembly to compile without permitting `eval()` of JavaScript.
 
-See [docs/07-heic.md](./docs/07-heic.md) for the design and the tests.
+See [docs/06-heic.md](./docs/06-heic.md) for the design and the tests.
 
 ## Architecture
 
@@ -326,7 +326,7 @@ For local development, run a single-node Garage (or any S3-compatible service), 
 
 Contributing with an AI agent? [AGENTS.md](./AGENTS.md) lists the constraints every
 change has to respect. The full cycle from local checks to a published image is in
-[docs/09-release-workflow.md](./docs/09-release-workflow.md).
+[docs/08-release-workflow.md](./docs/08-release-workflow.md).
 
 ## Current limitations
 

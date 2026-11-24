@@ -218,7 +218,7 @@ SITE_DESCRIPTION=家庭相册
 打开 `DEDUP_BACKFILL` 会让首次启动把库里所有原图从 Bucket 读一遍来算哈希，
 所以默认关闭。没有回填时旧照片不参与比对，弹窗会如实显示相册里有多少张这样的照片。
 
-完整设计见 [docs/05-photo-dedup.md](./docs/05-photo-dedup.md)。
+完整设计见 [docs/04-photo-dedup.md](./docs/04-photo-dedup.md)。
 
 #### 回收站
 
@@ -230,7 +230,7 @@ SITE_DESCRIPTION=家庭相册
 Bucket 里直到保留期结束。操作后会弹出带「撤销」的提示（8 秒），回收站页可以随时
 恢复。如果照片所属的相册也被删了，恢复照片会把相册一起恢复。
 
-完整设计见 [docs/06-trash.md](./docs/06-trash.md)。
+完整设计见 [docs/05-trash.md](./docs/05-trash.md)。
 
 ## 对象存储要求
 
@@ -266,12 +266,12 @@ WebAssembly 版本——约 2 MB 的分块，懒加载，能原生解码的浏�
 
 在这个功能之前上传的照片保留原有时间戳，不会被追溯修改。
 
-解析实现与边界见 [docs/08-exif-time.md](./docs/08-exif-time.md)。
+解析实现与边界见 [docs/07-exif-time.md](./docs/07-exif-time.md)。
 
 CSP 里包含 `'wasm-unsafe-eval'`，它允许编译 WebAssembly，但不允许 `eval()`
 执行 JavaScript 源码。
 
-设计说明与测试见 [docs/07-heic.md](./docs/07-heic.md)。
+设计说明与测试见 [docs/06-heic.md](./docs/06-heic.md)。
 
 ## 架构
 
@@ -305,7 +305,7 @@ docker run --rm -e CI=true -v "$PWD/web":/src -w /src node:22-alpine \
 本地联调可以自行启动一个单节点 Garage（或任意 S3 兼容服务），把 `APP_ENV` 设为 `development` 并使用 HTTP 地址。
 
 用 AI Agent 参与开发时，先读 [AGENTS.md](./AGENTS.md)（硬性约束），完整流程见
-[docs/09-release-workflow.md](./docs/09-release-workflow.md)（从本地校验到镜像发布）。
+[docs/08-release-workflow.md](./docs/08-release-workflow.md)（从本地校验到镜像发布）。
 
 ## 当前边界
 
