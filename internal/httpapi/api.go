@@ -149,6 +149,13 @@ func (a *API) Routes() http.Handler {
 	static("/media", "./web/dist/media", "public, max-age=604800")
 	static("/photos", "./web/dist/photos", "public, max-age=86400")
 	r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, "./web/dist/favicon.svg") })
+	// The service worker and the manifest must not be cached for a year, or a
+	// release would never reach an installed client. `serveSPA` serves every
+	// other file under ./web/dist with immutable caching, so these two get their
+	// own routes before the SPA fallback.
+	r.Get("/sw.js", a.serveUncached("./web/dist/sw.js", "text/javascript; charset=utf-8"))
+	r.Get("/manifest.webmanifest", a.serveUncached("./web/dist/manifest.webmanifest", "application/manifest+json"))
+	static("/icons", "./web/dist/icons", "public, max-age=604800")
 	return r
 }
 
@@ -436,4 +443,28 @@ func (a *API) serveSPA(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, "./web/dist/index.html")
+}
+
+// serveUncached serves a single file that must be revalidated on every request.
+//
+// `serveSPA` marks everything it finds under ./web/dist with a one-year
+// immutable cache, which is right for hashed assets and fatal for `sw.js`: an
+// installed client would keep the old worker (and therefore miss new bundles)
+// until the cache expired. The file is still delivered as-is, with a matched
+// Content-Type so the browser accepts it as a worker and a manifest.
+func (a *API) serveUncached(path, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", T(r)("not_found"))
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Type", contentType)
+		// A service worker is also governed by Service-Worker-Allowed when its
+		// scope reaches above its own directory; registering from /sw.js with a
+		// root scope needs this header to be explicit.
+		w.Header().Set("Service-Worker-Allowed", "/")
+		http.ServeFile(w, r, path)
+	}
 }

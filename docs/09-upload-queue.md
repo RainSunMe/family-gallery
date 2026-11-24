@@ -1,7 +1,7 @@
 # 批量上传队列（Upload Queue）
 
-- **状态**：P1-a（后端）、P1-b（队列基础设施）已实现并验证；P1-c（队列页 UI）、
-  P1-d（PWA）待做
+- **状态**：P1-a（后端）、P1-b（队列基础设施）、P1-c（队列页 UI）、P1-d（PWA）
+  已实现并验证；P1-e（1000 张实测）待做
 - **影响范围**：`web/src/lib/upload.ts`、`web/src/lib/queue/*`、
   `web/src/components/UploadDialog.tsx`、`internal/httpapi/uploads.go`、
   `internal/storage/storage.go`、`internal/database/database.go`、
@@ -15,7 +15,7 @@
 | P1-a | schema + `ListParts` + pending/resign/parts-list + `complete` 自愈 + 回收器 | ✅ 已实现 |
 | P1-b | `queue/{types,db,source,matcher,store,runner}` + `upload.ts` 拆成可复用步骤 | ✅ 已实现 |
 | P1-c | 队列页 `/uploads` + 添加来源对话框 + 侧栏/顶栏入口 | ✅ 已实现 |
-| P1-d | PWA（`sw.js` / manifest / 独立静态路由） | 待做 |
+| P1-d | PWA（`sw.js` / manifest / 独立静态路由） | ✅ 已实现 |
 | P1-e | 真实 1000 张实测 + 文档定稿 | 待做 |
 
 P1-a 的实测记录见 §16，P1-b 见 §17，P1-c 见 §18。
@@ -628,6 +628,13 @@ iOS 从相册取回的 `File.lastModified` 可能是导出时间，因此匹配�
 ---
 
 ## 10. PWA
+
+> **实现状态**：已落地。`web/public/sw.js`（零缓存）、`web/public/manifest.webmanifest`、
+> `web/public/icons/icon-{180,192,512}.png` + `icon-maskable-512.png`；
+> `web/src/main.tsx` 在 `load` 后注册；Go 侧 `r.Get("/sw.js")` 与
+> `r.Get("/manifest.webmanifest")` 走 `serveUncached`（`Cache-Control: no-cache` 与
+> `Service-Worker-Allowed: /`），`static("/icons", …)` 给图标一周缓存。
+> 这三个路由必须留在 `r.NotFound(a.serveSPA)` 之前。
 
 ### 10.1 为什么加
 
