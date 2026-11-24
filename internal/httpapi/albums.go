@@ -208,22 +208,42 @@ func (a *API) listPhotos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	photos, keys, next, err := collectPhotoPage(rows, limit)
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	urls := make(map[string]string, len(photos))
+	for index, item := range photos {
+		url, _ := a.store.SignRead(r.Context(), keys[index], "")
+		urls[item.ID] = url
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": photos, "urls": urls, "next_cursor": next})
+}
+
+// collectPhotoPage reads at most `limit` photos and works out the next cursor.
+//
+// The query fetches limit+1 rows so the caller can tell "last page" from "more to
+// come" without a second count query. The cursor must therefore come from the
+// last row actually *returned*: taking it from the extra probe row made the next
+// page resume past that row, so one photo vanished at every page boundary.
+func collectPhotoPage(rows *sql.Rows, limit int) ([]Photo, []string, string, error) {
 	photos := make([]Photo, 0, limit)
-	urls := make(map[string]string)
+	keys := make([]string, 0, limit)
 	lastTaken := ""
 	lastID := ""
 	for rows.Next() {
 		var item Photo
 		var key string
 		if err := rows.Scan(&item.ID, &item.AlbumID, &item.Name, &item.Mime, &item.Size, &item.Width, &item.Height, &item.TakenAt, &key, &item.Contributor); err != nil {
-			a.internal(w, err)
-			return
+			return nil, nil, "", err
 		}
-		if len(photos) < limit {
-			photos = append(photos, item)
-			url, _ := a.store.SignRead(r.Context(), key, "")
-			urls[item.ID] = url
+		if len(photos) >= limit {
+			// The probe row only proves there is another page.
+			continue
 		}
+		photos = append(photos, item)
+		keys = append(keys, key)
 		lastTaken = item.TakenAt
 		lastID = item.ID
 	}
@@ -231,7 +251,7 @@ func (a *API) listPhotos(w http.ResponseWriter, r *http.Request) {
 	if len(photos) == limit {
 		next = lastTaken + "|" + lastID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": photos, "urls": urls, "next_cursor": next})
+	return photos, keys, next, rows.Err()
 }
 
 func (a *API) signRead(w http.ResponseWriter, r *http.Request) {
