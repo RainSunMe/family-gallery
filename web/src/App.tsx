@@ -28,7 +28,7 @@ function AlbumRoute() {
   // Covers are a shared-space decision, not an administrative one: the server
   // does not gate the endpoint, and every member can already upload into the
   // album, so hiding the menu item only made the two disagree.
-  return <PhotosPage albumID={albumID} onUpload={actions.onUpload} onShare={() => listAlbums().then(result => { const album = result.items.find(item => item.id === albumID); if (album) actions.onShare(album); })} canSetCover canTrash onTrash={actions.onTrash} onDeleteAlbum={actions.role === 'admin' ? () => actions.onDeleteAlbum(albumID) : undefined} onToast={actions.onToast} />;
+  return <PhotosPage albumID={albumID} onUpload={actions.onUpload} onShare={() => listAlbums().then(result => { const album = result.items.find(item => item.id === albumID); if (album) actions.onShare(album); })} canSetCover canEditAlbum={actions.role === 'admin'} canTrash onTrash={actions.onTrash} onDeleteAlbum={actions.role === 'admin' ? () => actions.onDeleteAlbum(albumID) : undefined} onToast={actions.onToast} />;
 }
 function CollectionsRoute() { const actions = useFamilyActions(); return <CollectionsPage onNew={actions.onNewCollection} />; }
 function CollectionRoute() { const { collectionID } = collectionDetailRoute.useParams(); const actions = useFamilyActions(); return <CollectionDetail id={collectionID} onToast={actions.onToast} />; }

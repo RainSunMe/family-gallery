@@ -74,6 +74,7 @@ export const listCollections = () => api<{ items: Collection[] }>('/collections'
 export const getCollection = (id: string) => api<Collection>(`/collections/${id}`);
 export const listShares = () => api<{ items: Share[] }>('/shares');
 export const createAlbum = (input: { name: string; description: string }) => api<Album>('/albums', { method: 'POST', body: JSON.stringify(input) });
+export const updateAlbum = (id: string, input: { name: string; description: string }) => api<{ updated: boolean }>(`/albums/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 export const setAlbumCover = (albumID: string, photoID: string) => api<Album>(`/albums/${albumID}/cover`, { method: 'PUT', body: JSON.stringify({ photo_id: photoID }) });
 export const createCollection = (input: { name: string; description: string; album_id: string; expiry_days: number; batch_limit: number; allow_message: boolean }) => api<{ id: string; url: string }>('/collections', { method: 'POST', body: JSON.stringify(input) });
 export const createShare = (input: { album_id: string; expiry_days: number }) => api<{ id: string; url: string }>('/shares', { method: 'POST', body: JSON.stringify(input) });
