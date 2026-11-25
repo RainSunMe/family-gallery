@@ -7,7 +7,7 @@ import type { Album } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { UPLOAD_ACCEPT } from '../lib/decode';
 import { canPickDirectory, DirectorySource, FileListSource, isPreviewableName, isVideoName, pickDirectory, type SourceEntry, type UploadSource } from '../lib/queue/source';
-import { enqueue, mobileLimit } from '../lib/queue/runner';
+import { enqueue } from '../lib/queue/runner';
 
 /** Rows painted at once; a 4000-photo folder still has to open in a blink. */
 const LIST_LIMIT = 200;
@@ -134,8 +134,6 @@ export function UploadSourceDialog({ albums, initialAlbum, onClose, onQueued }: 
     return source.open(entry);
   }, [source]);
 
-  const limit = mobileLimit(chosen);
-  const limitNotice = limit === 'files' ? t('queue.mobileFiles', { count: 100 }) : limit === 'bytes' ? t('queue.mobileBytes', { size: '500 MB' }) : '';
   // `formatSize(0)` rounds up to "1 KB", so the size is only shown once
   // something is actually selected.
   const summary = entries.length
@@ -221,12 +219,11 @@ export function UploadSourceDialog({ albums, initialAlbum, onClose, onQueued }: 
       {!canPickDirectory() && !entries.length && <p className="mt-1 text-[11px] leading-5 text-muted">{t('queue.pickFolderHint')}</p>}
       {notice && <p className="mt-3 text-[11px] leading-5 text-muted">{notice}</p>}
       {error && <p className="mt-3 text-[11px] leading-5 text-[#a25142]">{error}</p>}
-      {limitNotice && <p className="mt-3 text-[11px] leading-5 text-[#a2663d]">{limitNotice}</p>}
 
       <Note>{t('uploadDialog.note')}</Note>
       <div className="dialog-actions">
         <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('uploadDialog.close')}</button>
-        <button className="btn btn-primary" disabled={!chosen.length || !albumID || !source || busy || !!error || !!limitNotice}>
+        <button className="btn btn-primary" disabled={!chosen.length || !albumID || !source || busy || !!error}>
           {busy ? <LoaderCircle className="icon animate-spin" /> : <UploadCloud className="icon" />}
           {chosen.length ? `${t('queue.enqueue')} · ${chosen.length}` : t('queue.enqueue')}
         </button>

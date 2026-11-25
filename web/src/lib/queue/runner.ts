@@ -30,16 +30,13 @@ export function concurrency(): number {
   return matchMedia('(pointer: coarse)').matches ? 1 : 3;
 }
 
-/** A soft single-batch cap on phones, where a long batch is killed anyway. */
-export const MOBILE_MAX_FILES = 100;
-export const MOBILE_MAX_BYTES = 500 * 1024 * 1024;
-
-export function mobileLimit(entries: { size: number }[]): 'ok' | 'files' | 'bytes' {
-  if (typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches) return 'ok';
-  if (entries.length > MOBILE_MAX_FILES) return 'files';
-  const bytes = entries.reduce((sum, entry) => sum + entry.size, 0);
-  return bytes > MOBILE_MAX_BYTES ? 'bytes' : 'ok';
-}
+// There used to be a soft 100-file / 500 MB cap on phones, enforced in this file
+// and only this file. It blocked nothing real — the server has no such limit, and
+// the queue persists every step to IndexedDB — but it forced anyone importing a
+// camera roll into the same chore over and over. Removed on purpose: a phone that
+// runs out of memory is a phone whose tab reloads, and that is exactly what resume
+// already handles. Concurrency stays at 1 there, which is about decode memory
+// rather than batch size.
 
 // ---------------------------------------------------------------------------
 // Source registry

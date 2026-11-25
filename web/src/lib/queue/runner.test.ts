@@ -45,7 +45,7 @@ vi.mock('../decode', () => ({
 }));
 
 import { resetMemory, getRecord, getQueue, getCompletedTick } from './store';
-import { enqueue, cancel, mobileLimit, rebindSource, resetRunnerState } from './runner';
+import { enqueue, cancel, rebindSource, resetRunnerState } from './runner';
 import type { UploadSource } from './source';
 
 const grant = (id: string, multipart = true) => ({
@@ -233,11 +233,6 @@ describe('upload queue runner', () => {
     await cancel('c1');
     expect(getRecord('c1')).toBeUndefined();
     expect(mocks.api).toHaveBeenCalledWith('/uploads/u5', { method: 'DELETE' });
-  });
-
-  it('only reports a mobile cap on coarse pointers', () => {
-    // No matchMedia in the test environment, so the desktop rules apply.
-    expect(mobileLimit([{ size: 1024 }])).toBe('ok');
   });
 });
 
