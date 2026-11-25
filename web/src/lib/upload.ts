@@ -50,8 +50,23 @@ export async function buildDerivatives(file: File): Promise<DerivativeBlobs> {
   }
 }
 
-async function put(url: string, body: Blob): Promise<string> {
-  const response = await fetch(url, { method: 'PUT', body, headers: { 'Content-Type': body.type || 'application/octet-stream' } });
+/**
+ * PUT one blob to a presigned URL.
+ *
+ * `contentType` must be the exact media type the URL was signed with. SigV4
+ * covers `content-type`, so any other value comes back as
+ * `403 AccessDenied — Invalid signature`, which looks like a permissions or CORS
+ * problem and is neither.
+ *
+ * It is a parameter rather than `body.type` on purpose. `Blob.slice()` copies the
+ * file's type, and the browser's idea of that type is not the one we registered
+ * with the server: Safari reports an empty type for files picked out of the iOS
+ * Files app, which used to arrive here as `application/octet-stream` against a
+ * signature made for `image/png`. Chrome and Edge fill the type in, which is why
+ * the same upload worked there.
+ */
+async function put(url: string, body: Blob, contentType: string): Promise<string> {
+  const response = await fetch(url, { method: 'PUT', body, headers: { 'Content-Type': contentType } });
   if (!response.ok) throw new Error(t('upload.s3Failed', { status: response.status }));
   // The ETag is only local bookkeeping now: completion asks the server to list
   // the parts, so a CORS policy that hides the header no longer blocks an upload.
@@ -59,9 +74,17 @@ async function put(url: string, body: Blob): Promise<string> {
 }
 
 /** PUT a single blob (a derivative). Exported so the runner can retry it alone. */
-export async function putBlob(url: string, body: Blob): Promise<string> {
-  return put(url, body);
+export async function putBlob(url: string, body: Blob, contentType: string): Promise<string> {
+  return put(url, body, contentType);
 }
+
+/**
+ * What the bucket signs a thumbnail or preview with.
+ *
+ * The server hard-codes this pair in `createSession` and `resign`, so it is a
+ * constant here rather than something derived from the canvas output.
+ */
+const DERIVATIVE_MIME = 'image/webp';
 
 function guestPrefix(grant: UploadGrant): string {
   return grant.key.startsWith('collections/') ? '/guest/collections' : '';
@@ -124,14 +147,17 @@ const PART_CONCURRENCY = 3;
  * Parts run in parallel but `onPart` is still called in the order they finish —
  * the caller appends, and appending in completion order is harmless because a
  * part list is a set keyed by number.
+ *
+ * `mime` is required and is what every PUT sends: the single-part URL was signed
+ * with it, so the header has to match or the bucket answers 403.
  */
 export async function sendOriginal(
   file: File,
   grant: UploadGrant,
-  options: { skip?: number[]; onPart?: (part: TransferredPart) => void; onProgress?: UploadProgress } = {},
+  options: { mime: string; skip?: number[]; onPart?: (part: TransferredPart) => void; onProgress?: UploadProgress },
 ): Promise<TransferredPart[]> {
   if (!grant.multipart_upload_id) {
-    const etag = await put(grant.url, file);
+    const etag = await put(grant.url, file, options.mime);
     const part: TransferredPart = { n: 1, etag, size: file.size };
     options.onPart?.(part);
     options.onProgress?.(1, 1, t('upload.done'));
@@ -154,7 +180,7 @@ export async function sendOriginal(
       const start = index * partSize;
       const chunk = file.slice(start, Math.min(file.size, start + partSize));
       const signed = await api<{ url: string }>(`${guestPrefix(grant)}/uploads/${grant.id}/parts/sign`, { method: 'POST', body: JSON.stringify({ part_number: number }) });
-      const etag = await put(signed.url, chunk);
+      const etag = await put(signed.url, chunk, options.mime);
       const part: TransferredPart = { n: number, etag, size: chunk.size };
       parts.push(part);
       finished += 1;
@@ -170,7 +196,10 @@ export async function sendOriginal(
 
 /** Upload the thumbnail and the preview. */
 export async function sendDerivatives(grant: UploadGrant, blobs: DerivativeBlobs): Promise<void> {
-  await Promise.all([put(grant.thumb_url, blobs.thumb), put(grant.preview_url, blobs.preview)]);
+  await Promise.all([
+    put(grant.thumb_url, blobs.thumb, DERIVATIVE_MIME),
+    put(grant.preview_url, blobs.preview, DERIVATIVE_MIME),
+  ]);
 }
 
 /**
@@ -198,7 +227,7 @@ export async function uploadPhoto(file: File, albumID: string, options: UploadOp
     contentHash: options.contentHash, allowDuplicate: options.allowDuplicate,
     takenAt: takenAt || '', clientMtime: file.lastModified,
   });
-  await sendOriginal(file, grant, { onProgress });
+  await sendOriginal(file, grant, { mime, onProgress });
   await sendDerivatives(grant, blobs);
   const id = await completeSession(grant);
   onProgress?.(1, 1, t('upload.done'));
@@ -214,7 +243,7 @@ export async function uploadGuestPhoto(file: File, message: string, options: Upl
     name: file.name, size: file.size, mime, width: blobs.width, height: blobs.height,
     contentHash: options.contentHash, takenAt: takenAt || '', clientMtime: file.lastModified, message,
   });
-  await sendOriginal(file, grant, { onProgress });
+  await sendOriginal(file, grant, { mime, onProgress });
   await sendDerivatives(grant, blobs);
   return completeSession(grant);
 }

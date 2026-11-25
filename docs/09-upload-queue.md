@@ -1055,3 +1055,48 @@ src/lib/queue/runner.test.ts        9 passed
 | `/photos` 全库页 | ✅ 60 → 175（150 + 原有 25） |
 | 访客分享页 | ✅ 60 → 150 |
 | `pnpm test` | ✅ 70 项通过 |
+
+## 22. iOS Safari 上传 403「Invalid signature」（2026-11-25）
+
+**症状**：iPhone Safari 在访客收集页选 3 张 PNG（文件名是
+`F6F4B182-5A03-4C25-9266-4E88A8C41AEE.png` 这种，来自 iOS 文件 App），三张全部
+`403`；同一批文件在安卓 + Edge 上正常。
+
+**根因：presigned PUT 的 `content-type` 进了签名，而客户端发的是浏览器给的 blob
+类型，不是登记会话时用的 MIME。**
+
+- `storage.SignUpload(key, mime)` 把 `ContentType` 放进 `PutObjectInput`，于是
+  `X-Amz-SignedHeaders=content-type;host`。
+- 客户端 `put()` 用的是 `body.type || 'application/octet-stream'`。
+- iOS Safari 从文件 App 选出来的文件 **`File.type` 是空串**，于是签名写的是
+  `image/png`、请求发的是 `application/octet-stream` → Garage 回
+  `403 AccessDenied: Forbidden: Invalid signature`。
+- Chrome / Edge 会把 `image/png` 填好，所以同一份代码在那里正好对得上 —— 这就是
+  「只有 Safari 不行」的全部原因，和 CORS、网络、权限都无关。
+
+**实测复现**（本地 8090 + Garage，同一把签名 URL 发两次）：
+
+```
+PUT image/png               -> 200
+PUT application/octet-stream -> 403
+  <Error><Code>AccessDenied</Code><Message>Forbidden: Invalid signature</Message>
+```
+
+**修复**：`put()` 的 `Content-Type` 改成必填参数，值一律用**登记会话时那份 MIME**：
+
+- `sendOriginal(file, grant, { mime })`：单分片与多分片的每个 part 都用它。
+  （part 的 presign 不含 content-type，多传只是无害；单分片必须精确。）
+- `sendDerivatives` 用常量 `image/webp` —— 服务端就是拿这个字面量给
+  thumb/preview 签名的。
+- 调用方 `runner.ts` / `uploadPhoto` / `uploadGuestPhoto` 传自己的 `mime`。
+
+**同时改掉误导性文案**：`upload.s3Failed` 原来是「S3 上传失败（403），请检查 CORS
+与网络」—— 本次排查就被它带偏过一次，而且违反了 AGENTS.md「上传文案不出现 S3 /
+CORS」。现在是「上传失败（{status}），请重试」。
+
+**回归测试**：新增 `web/src/lib/upload.test.ts`（4 例）覆盖
+`File.type === ''`、浏览器猜成 `application/octet-stream`、多分片每个 part、
+衍生图固定 `image/webp`。
+
+**端到端验证**（Chromium 里构造 `type: ''` 的 File 模拟 Safari）：走任务队列上传
+一张 canvas 生成的 PNG → 队列清空、相册 `photo_count` 1、入库 `mime=image/png`。

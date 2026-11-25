@@ -570,6 +570,7 @@ async function processRecord(record: QueueRecord): Promise<void> {
   // 4. Original bytes. Already-transferred parts are skipped.
   current = (await store.setStatus(current.id, 'uploading')) ?? current;
   await sendOriginal(file, grant, {
+    mime,
     skip: current.parts.map(part => part.n),
     onPart: part => persistPart(current.id, part),
   });
