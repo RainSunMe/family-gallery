@@ -69,7 +69,16 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 
 export const listAlbums = () => api<{ items: Album[] }>('/albums');
 export const getAlbum = (id: string) => api<Album>(`/albums/${id}`);
-export const listPhotos = (albumId = '', type = 'all') => api<PhotoPage>(`${albumId ? `/albums/${albumId}/photos` : '/photos'}${type !== 'all' ? `?type=${type}` : ''}`);
+// Photos are cursor-paginated: the server returns one page plus the cursor of
+// the next one. Cursors are keyset-based (`taken_at|id`), so a page stays stable
+// even while an upload is still adding photos to the album.
+export const listPhotos = (albumId = '', type = 'all', cursor = '') => {
+  const query = new URLSearchParams();
+  if (type !== 'all') query.set('type', type);
+  if (cursor) query.set('cursor', cursor);
+  const suffix = query.toString();
+  return api<PhotoPage>(`${albumId ? `/albums/${albumId}/photos` : '/photos'}${suffix ? `?${suffix}` : ''}`);
+};
 export const listCollections = () => api<{ items: Collection[] }>('/collections');
 export const getCollection = (id: string) => api<Collection>(`/collections/${id}`);
 export const listShares = () => api<{ items: Share[] }>('/shares');
@@ -85,7 +94,7 @@ export const createDownload = (input: { album_id: string; photo_ids: string[]; m
 export const getDownload = (id: string, guestToken = '') => api<DownloadJob>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}`);
 export const signDownload = (id: string, packageID: string, guestToken = '') => api<{ url: string }>(`${guestToken ? `/guest/shares/${guestToken}` : ''}/downloads/${id}/sign`, { method: 'POST', body: JSON.stringify({ package_id: packageID }) });
 export const guestAlbum = (token: string) => api<Album>(`/guest/shares/${token}/album`);
-export const guestPhotos = (token: string, albumID: string) => api<PhotoPage>(`/guest/shares/${token}/photos?album_id=${albumID}`);
+export const guestPhotos = (token: string, albumID: string, cursor = '') => api<PhotoPage>(`/guest/shares/${token}/photos?album_id=${encodeURIComponent(albumID)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
 export const guestCollection = () => api<{ id: string; name: string; description: string; expires_at: string; batch_limit: number; allow_message: boolean; display_name: string }>('/guest/collections/current');
 export const guestSession = (token: string, displayName: string) => api<{ display_name: string }>(`/guest/collections/${token}/session`, { method: 'POST', body: JSON.stringify({ display_name: displayName }) });
 export const guestSubmissions = () => api<{ items: { id: string; name: string; url: string; status: string; created_at: string }[] }>('/guest/collections/submissions');

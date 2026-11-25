@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ImagePlus, LoaderCircle, Pause, Play, RotateCcw, ScanSearch, Trash2, UploadCloud, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, CircleDot, CircleDashed, Clock3, ImagePlus, Pause, Play, RotateCcw, ScanSearch, Trash2, UploadCloud, X } from 'lucide-react';
 import { formatSize } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { Empty } from './ui';
 import { usePageTitleScroll } from './HeaderTitleContext';
-import { useQueue, useCompletedTick, getLedger, removeRecord } from '../lib/queue/store';
+import { useQueue, useSummary, useCompletedTick, removeRecord } from '../lib/queue/store';
 import { uploadedBytes, type QueueRecord, type QueueStatus } from '../lib/queue/types';
 import { cancel, isPaused, pause, previewUrl, releasePreview, resume, retry } from '../lib/queue/runner';
 
@@ -36,7 +36,29 @@ const STATUS_KEY: Record<QueueStatus, string> = {
   failed: 'queue.statusFailed',
 };
 
-type Group = { id: string; titleKey: string; icon: typeof LoaderCircle; records: QueueRecord[]; spin: boolean };
+/**
+ * A status icon, never a spinner.
+ *
+ * Thirty spinning rings are thirty compositor animations plus the repaint of
+ * whatever they cover, and none of them says anything the words do not. The icon
+ * carries the *kind* of row; the colour carries where it is; the label carries
+ * the rest.
+ */
+const STATUS_ICON: Record<QueueStatus, typeof Clock3> = {
+  waiting: CircleDashed,
+  queued: Clock3,
+  hashing: CircleDot,
+  checking: CircleDot,
+  creating: CircleDot,
+  uploading: CircleDot,
+  deriving: CircleDot,
+  completing: CircleDot,
+  done: CircleDot,
+  skipped: ScanSearch,
+  failed: AlertTriangle,
+};
+
+type Group = { id: string; titleKey: string; icon: typeof Clock3; records: QueueRecord[] };
 
 export function UploadQueuePage({ onAdd, onReattach, onToast }: {
   onAdd: () => void;
@@ -55,41 +77,22 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
   const [paused, setPaused] = useState(isPaused());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const stats = useMemo(() => {
-    // Counters come from the ledger, not from `records`: completed rows are gone,
-    // so counting visible rows would shrink the denominator mid-batch.
-    const ledger = getLedger();
-    let preparing = 0, uploading = 0, failed = 0, skipped = 0, moving = 0;
-    for (const record of records) {
-      // A skipped record is already counted in full in resolvedBytes, so adding
-      // the parts it had uploaded before the duplicate was detected would push
-      // "sent" past the total.
-      if (record.status !== 'skipped') moving += uploadedBytes(record);
-      if (record.status === 'skipped') skipped += 1;
-      else if (record.status === 'failed') failed += 1;
-      else if (UPLOADING.includes(record.status)) uploading += 1;
-      else preparing += 1;
-    }
-    return {
-      preparing, uploading, failed, skipped,
-      total: ledger.total,
-      resolved: ledger.resolved,
-      totalBytes: ledger.totalBytes,
-      sent: ledger.resolvedBytes + moving,
-    };
-  }, [records]);
-
+  // Only the row list depends on `records`. The bar reads the summary, which is
+  // published per batch rather than per paint, so grouping here is the one
+  // derived value left on this component.
   const groups = useMemo<Group[]>(() => {
     const pick = (statuses: QueueStatus[]) => records.filter(record => statuses.includes(record.status));
     // Uploading first: that is the phase with a live byte counter, so it is the
     // one worth keeping at the top of the list.
     return [
-      { id: 'uploading', titleKey: 'queue.phaseUploading', icon: UploadCloud, records: pick(UPLOADING), spin: false },
-      { id: 'preparing', titleKey: 'queue.phasePreparing', icon: LoaderCircle, records: pick(PREPARING), spin: true },
-      { id: 'failed', titleKey: 'queue.needsAction', icon: AlertTriangle, records: pick(['failed']), spin: false },
-      { id: 'skipped', titleKey: 'queue.skippedList', icon: ScanSearch, records: pick(['skipped']), spin: false },
+      { id: 'uploading', titleKey: 'queue.phaseUploading', icon: UploadCloud, records: pick(UPLOADING) },
+      { id: 'preparing', titleKey: 'queue.phasePreparing', icon: Clock3, records: pick(PREPARING) },
+      { id: 'failed', titleKey: 'queue.needsAction', icon: AlertTriangle, records: pick(['failed']) },
+      { id: 'skipped', titleKey: 'queue.skippedList', icon: ScanSearch, records: pick(['skipped']) },
     ];
   }, [records]);
+
+  const hasWork = records.some(record => PREPARING.includes(record.status) || UPLOADING.includes(record.status));
 
   const togglePause = () => {
     if (paused) { resume(); setPaused(false); } else { pause(); setPaused(true); }
@@ -110,14 +113,6 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
     </div>;
   }
 
-  const percent = stats.totalBytes ? Math.min(100, stats.sent / stats.totalBytes * 100) : 0;
-  // One bar for both phases: the fill is bytes actually transferred, so it stays
-  // still during preparation and only moves when data is moving. The label says
-  // which phase is busy so a motionless bar is never mistaken for a stall.
-  const phase = stats.uploading > 0
-    ? t('queue.bytes', { done: formatSize(stats.sent), total: formatSize(stats.totalBytes) })
-    : t('queue.phasePreparingCount', { done: stats.resolved, total: stats.total });
-
   return <div className="page">
     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-5 mb-6">
       <div ref={titleRef}>
@@ -125,28 +120,17 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
         <p className="page-description">{t('queue.description')}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {(stats.preparing > 0 || stats.uploading > 0) && <button className="btn btn-secondary" onClick={togglePause}>
+        {hasWork && <button className="btn btn-secondary" onClick={togglePause}>
           {paused ? <Play className="icon" /> : <Pause className="icon" />}{t(paused ? 'queue.resume' : 'queue.pause')}
         </button>}
         <button className="btn btn-primary" onClick={onAdd}><ImagePlus className="icon" />{t('queue.addMore')}</button>
       </div>
     </div>
 
-    {/* One bar for the whole queue. Its fill is bytes actually transferred, so it
-        holds still while files are being prepared and only moves when data moves;
-        the line above says which phase is busy so that is never read as a stall. */}
-    <div className="mb-7">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2.5 text-[11px]">
-        <span className="text-secondary tabular-nums">{phase}</span>
-        {stats.uploading > 0 && stats.preparing > 0 && <span className="text-muted">{t('queue.phasePreparingCount', { done: stats.resolved, total: stats.total })}</span>}
-        {paused && <span className="text-[#a2663d]">{t('queue.pausedNotice')}</span>}
-        {stats.failed > 0 && <span className="text-[#a25142]">{t('queue.failedCount', { count: stats.failed })}</span>}
-        {stats.skipped > 0 && <span className="text-muted">{t('queue.skippedCount', { count: stats.skipped })}</span>}
-      </div>
-      <div className="queue-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}>
-        <div className="queue-bar-fill" style={{ width: `${percent}%` }} />
-      </div>
-    </div>
+    {/* One bar for the whole queue. Its own component, and its own subscription:
+        progress is the only thing that changes often, so it re-renders alone and
+        the rows (and their thumbnails) keep their identity. */}
+    <QueueProgress paused={paused} />
 
     {groups.filter(group => group.records.length).map(group => {
       const open = expanded[group.id];
@@ -154,7 +138,7 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
       const hidden = group.records.length - shown.length;
       return <section key={group.id} className="mb-8">
         <h2 className="flex items-center gap-2 text-xs font-medium text-secondary mb-3">
-          <group.icon className={`icon w-4 h-4 ${group.spin ? 'animate-spin' : ''}`} />
+          <group.icon className="icon w-4 h-4" />
           {t(group.titleKey)}
           <small className="text-muted font-normal">{group.records.length}</small>
         </h2>
@@ -170,7 +154,12 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
 
     <style>{`
       .queue-bar{height:6px;border-radius:999px;overflow:hidden;background:var(--color-soft)}
-      .queue-bar-fill{height:100%;border-radius:inherit;background:var(--color-accent);transition:width .3s ease}
+      .queue-bar-fill{height:100%;border-radius:inherit;background:var(--color-accent)}
+      /* Width only ever grows during a batch, so the browser can animate it
+         without a keyframe. Long enough to hide the jump between part
+         acknowledgements, short enough to still feel live. */
+      .queue-bar-fill{transition:width .5s linear}
+      @media (prefers-reduced-motion: reduce){.queue-bar-fill{transition:none}}
       .queue-list{border:1px solid var(--color-line);border-radius:14px;overflow:hidden;background:var(--color-surface)}
       .queue-list>li+li{border-top:1px solid var(--color-line)}
       .queue-row{display:flex;align-items:center;gap:12px;padding:10px 12px}
@@ -182,6 +171,44 @@ export function UploadQueuePage({ onAdd, onReattach, onToast }: {
   </div>;
 }
 
+/**
+ * One bar for the whole batch.
+ *
+ * Its own component on purpose: this is the only part of the page that changes
+ * every few hundred milliseconds, so it subscribes to the summary alone and a
+ * part landing re-renders this and nothing else. The rows keep their identity,
+ * so no thumbnail is re-fetched.
+ *
+ * The fill is bytes actually at the bucket: it holds still while files are
+ * being prepared and only moves when data moves. The label says which phase is
+ * busy so a motionless bar is never read as a stall, and it never swaps between
+ * two scales — that swap is what made the old bar look like it was moving
+ * backwards.
+ */
+function QueueProgress({ paused }: { paused: boolean }) {
+  const t = useT();
+  const summary = useSummary();
+  const percent = summary.totalBytes ? Math.min(100, summary.sent / summary.totalBytes * 100) : 0;
+  // One scale from start to finish: files settled, out of the batch's size.
+  const settled = summary.total - summary.active;
+  const label = summary.uploading > 0
+    ? t('queue.bytes', { done: formatSize(summary.sent), total: formatSize(summary.totalBytes) })
+    : t('queue.progress', { done: settled, total: summary.total });
+
+  return <div className="mb-7">
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2.5 text-[11px]">
+      <span className="text-secondary tabular-nums">{label}</span>
+      {summary.uploading > 0 && summary.preparing > 0 && <span className="text-muted">{t('queue.phasePreparingCount', { done: settled, total: summary.total })}</span>}
+      {paused && <span className="text-[#a2663d]">{t('queue.pausedNotice')}</span>}
+      {summary.failed > 0 && <span className="text-[#a25142]">{t('queue.failedCount', { count: summary.failed })}</span>}
+      {summary.skipped > 0 && <span className="text-muted">{t('queue.skippedCount', { count: summary.skipped })}</span>}
+    </div>
+    <div className="queue-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}>
+      <div className="queue-bar-fill" style={{ width: `${percent}%` }} />
+    </div>
+  </div>;
+}
+
 function QueueRow({ record, onReattach, onToast }: { record: QueueRecord; onReattach: (sessionId: string) => void; onToast: (message: string) => void }) {
   const t = useT();
   const [thumb, setThumb] = useState<string | null>(null);
@@ -190,7 +217,8 @@ function QueueRow({ record, onReattach, onToast }: { record: QueueRecord; onReat
   useEffect(() => {
     mounted.current = true;
     // Every row gets a thumbnail: recognising the file is the point of showing
-    // it. URLs are revoked on unmount, and only the rendered window holds one.
+    // it. The effect keys off the record's identity only, so a progress update
+    // cannot unmount the image and make the browser fetch it again.
     previewUrl(record).then(url => { if (mounted.current && url) setThumb(url); }).catch(() => undefined);
     return () => {
       mounted.current = false;
@@ -203,6 +231,13 @@ function QueueRow({ record, onReattach, onToast }: { record: QueueRecord; onReat
   const label = record.status === 'waiting' ? t('queue.statusWaiting') : t(STATUS_KEY[record.status]);
   const uploading = UPLOADING.includes(record.status);
   const active = uploading || PREPARING.includes(record.status);
+  // A status icon, never a spinner: the icon says what kind of row this is and
+  // the colour says where it is; the words underneath say the rest.
+  const Icon = STATUS_ICON[record.status];
+  const tone = record.status === 'failed' ? 'text-[#a25142]'
+    : record.status === 'skipped' ? 'text-muted'
+    : record.status === 'waiting' ? 'text-muted'
+    : 'text-accent';
   // Only the bytes phase has a meaningful counter; preparing shows the size it is
   // about to send rather than a fake "0 / N".
   const detail = uploading && transferred > 0 && transferred < record.size
@@ -211,7 +246,7 @@ function QueueRow({ record, onReattach, onToast }: { record: QueueRecord; onReat
 
   return <li className="queue-row">
     <span className="queue-thumb">
-      {thumb ? <img src={thumb} alt="" draggable={false} /> : <ImagePlus className="icon w-4 h-4 text-muted" />}
+      {thumb ? <img src={thumb} alt="" draggable={false} decoding="async" /> : <ImagePlus className="icon w-4 h-4 text-muted" />}
     </span>
     <span className="min-w-0 flex-1">
       <span className="flex items-center gap-1.5 text-xs text-ink">
@@ -228,15 +263,7 @@ function QueueRow({ record, onReattach, onToast }: { record: QueueRecord; onReat
       {record.status === 'failed' && <button className="queue-row-action" onClick={() => retry(record.id)} aria-label={t('queue.retry')} title={t('queue.retry')}><RotateCcw className="icon w-4 h-4" /></button>}
       {(record.status === 'skipped' || record.status === 'failed') && <button className="queue-row-action" onClick={() => { void removeRecord(record.id); releasePreview(record.id); }} aria-label={t('queue.cancel')} title={t('queue.cancel')}><X className="icon w-4 h-4" /></button>}
       {active && <button className="queue-row-action" onClick={() => { cancel(record.id).catch(reason => onToast(reason instanceof Error ? reason.message : t('queue.failedGeneric'))); }} aria-label={t('queue.cancel')} title={t('queue.cancel')}><Trash2 className="icon w-4 h-4" /></button>}
-      {active && <LoaderCircle className="icon w-4 h-4 text-accent animate-spin ml-1" />}
-      {record.status === 'failed' && <AlertTriangle className="icon w-4 h-4 text-[#a25142] ml-1" />}
-      {record.status === 'skipped' && <ScanSearch className="icon w-4 h-4 text-muted ml-1" />}
+      <Icon className={`icon w-4 h-4 ml-1 ${tone}`} />
     </span>
   </li>;
-}
-
-/** How many files still need the queue's attention; used for the shell badge. */
-export function useQueueSummary() {
-  const records = useQueue();
-  return useMemo(() => records.filter(record => record.status !== 'skipped' && record.status !== 'failed').length, [records]);
 }

@@ -24,19 +24,27 @@ import { matchEntry } from './matcher';
 
 const t = (key: string, vars?: Record<string, string | number>) => translate(currentLocale(), key, vars);
 
-/** Phones get one file at a time: three concurrent decodes exhausts the tab. */
+/** How many files the pool may work on at once, on any device. */
 export function concurrency(): number {
-  if (typeof matchMedia !== 'function') return 3;
-  return matchMedia('(pointer: coarse)').matches ? 1 : 3;
+  return 5;
 }
+
+// Why 5: the part size is 8 MiB and the browser caps a PUT at roughly six
+// connections per host, so fewer than five files rarely filled the pipe. One
+// file's parts go out in parallel too (see `sendOriginal`), which is what makes
+// a single large video keep the line busy instead of sawtoothing between parts.
+//
+// Desktop and phone now share the same number. The old phone limit of 1 was
+// about decode memory rather than bandwidth: a tab that runs out reloads itself,
+// and resuming is exactly what the queue already does.
 
 // There used to be a soft 100-file / 500 MB cap on phones, enforced in this file
 // and only this file. It blocked nothing real — the server has no such limit, and
 // the queue persists every step to IndexedDB — but it forced anyone importing a
 // camera roll into the same chore over and over. Removed on purpose: a phone that
 // runs out of memory is a phone whose tab reloads, and that is exactly what resume
-// already handles. Concurrency stays at 1 there, which is about decode memory
-// rather than batch size.
+// already handles. Concurrency is no longer split by device, so this file makes
+// no per-device decision about batch size at all.
 
 // ---------------------------------------------------------------------------
 // Source registry
@@ -440,15 +448,39 @@ async function attempt(record: QueueRecord): Promise<void> {
   }
 }
 
-/** A part is persisted as soon as the bucket accepts it. */
-let persistChain: Promise<unknown> = Promise.resolve();
+/**
+ * A part is persisted as soon as the bucket accepts it.
+ *
+ * Parts of one file are now uploaded in parallel, so they can land out of order.
+ * Writes are serialised per file — a read-modify-write on that file's part list
+ * must not interleave with itself — but not across files, otherwise five
+ * concurrent uploads would queue behind a single global write chain and lose
+ * most of the concurrency they just gained.
+ *
+ * Quiet: the bytes must reach disk (that is the resume story), but a part
+ * landing must not reassign every record in the list. The bar is told
+ * separately and recomputes from the same map.
+ */
+const persistChains = new Map<string, Promise<unknown>>();
 function persistPart(id: string, part: TransferredPart): void {
-  persistChain = persistChain.then(async () => {
+  const previous = persistChains.get(id) ?? Promise.resolve();
+  const next = previous.then(async () => {
     const current = store.getRecord(id);
     if (!current) return;
     // Re-read each time so two parts finishing out of order cannot drop one.
-    await store.patchRecord(id, { parts: [...current.parts, { n: part.n, size: part.size, etag: part.etag }] });
-  }).catch(() => undefined);
+    await store.patchRecord(id, { parts: [...current.parts, { n: part.n, size: part.size, etag: part.etag }] }, { quiet: true });
+    store.signalSummary();
+  }).catch(() => undefined).finally(() => {
+    // Drop the entry once this file's chain is idle, so the map does not grow
+    // with every file the page ever touched.
+    if (persistChains.get(id) === next) persistChains.delete(id);
+  });
+  persistChains.set(id, next);
+}
+
+/** Wait for every pending part write to reach IndexedDB. */
+async function flushParts(): Promise<void> {
+  await Promise.all(persistChains.values());
 }
 
 async function processRecord(record: QueueRecord): Promise<void> {
@@ -541,7 +573,10 @@ async function processRecord(record: QueueRecord): Promise<void> {
     skip: current.parts.map(part => part.n),
     onPart: part => persistPart(current.id, part),
   });
-  await persistChain;
+  // All of this file's parts are acknowledged; make sure each is on disk before
+  // the record can be finished, or a reload right after completion would find a
+  // part list missing entries for bytes that are already in the bucket.
+  await flushParts();
 
   // 5. Thumbnail and preview. Only rebuilt when a previous attempt did not
   //    finish them, so a resumed file is not decoded twice.

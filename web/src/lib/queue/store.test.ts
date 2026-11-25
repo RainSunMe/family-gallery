@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { QueueRecord } from './types';
 import { uploadedBytes, isActive, isFinished } from './types';
 import {
-  clearFinished, getQueue, getRecord, hydrate, patchRecord, pendingRecords,
-  recordsForSession, removeRecord, resetMemory, setStatus, upsertRecord,
+  clearFinished, getQueue, getRecord, getSummary, hydrate, patchRecord, pendingRecords,
+  recordsForSession, removeRecord, resetMemory, setStatus, signalSummary, upsertRecord,
 } from './store';
 
 const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
@@ -72,6 +72,36 @@ describe('queue store', () => {
     await upsertRecord(record({ id: 'b', status: 'uploading' }));
     await upsertRecord(record({ id: 'c', status: 'waiting' }));
     expect(pendingRecords().map(item => item.id)).toEqual(['a']);
+  });
+
+  it('does not publish a new snapshot for a quiet progress write', async () => {
+    await upsertRecord(record());
+    const before = getQueue();
+    // A part landing writes through to IndexedDB but must not hand every row a
+    // new object: that is what used to re-render the list (and reload the
+    // thumbnails) once per 8 MiB.
+    await patchRecord('r1', { parts: [{ n: 1, size: 8, etag: 'e1' }] }, { quiet: true });
+    expect(getQueue()).toBe(before);
+    expect(getRecord('r1')?.parts).toHaveLength(1);
+  });
+
+  it('makes a quiet progress write visible to the bar', async () => {
+    await upsertRecord(record({ status: 'uploading' }));
+    await patchRecord('r1', { parts: [{ n: 1, size: 64, etag: 'e1' }] }, { quiet: true });
+    signalSummary();
+    // The bytes are visible to the bar even though no render happened.
+    expect(getSummary().sent).toBe(64);
+    expect(getSummary().uploading).toBe(1);
+  });
+
+  it('keeps the summary reference stable when nothing changed', async () => {
+    await upsertRecord(record());
+    signalSummary();
+    const first = getSummary();
+    // useSyncExternalStore treats a new object as a change. Re-signalling with
+    // identical numbers must not build a new one, or React loops forever.
+    signalSummary();
+    expect(getSummary()).toBe(first);
   });
 
   it('removes a record', async () => {

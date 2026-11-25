@@ -49,7 +49,7 @@ function GuestShareRoute() {
   // PhotosPage drives the shared top bar (back/download/share), so it needs the
   // header provider the family shell would otherwise install. The guest route
   // sits outside the family layout, hence the provider here.
-  return <HeaderTitleProvider><div className="fixed left-1/2 -translate-x-1/2 top-3 z-20 px-4 py-2 rounded-full bg-surface/80 backdrop-blur-xl border border-line text-xs text-secondary shadow-sm">{t('guest.readOnly')}</div><PhotosPage albumID={album.id} guestToken={token} guestAlbum={() => Promise.resolve(album)} guestPhotos={() => guestPhotos(token, album.id)} /></HeaderTitleProvider>;
+  return <HeaderTitleProvider><div className="fixed left-1/2 -translate-x-1/2 top-3 z-20 px-4 py-2 rounded-full bg-surface/80 backdrop-blur-xl border border-line text-xs text-secondary shadow-sm">{t('guest.readOnly')}</div><PhotosPage albumID={album.id} guestToken={token} guestAlbum={() => Promise.resolve(album)} guestPhotos={cursor => guestPhotos(token, album.id, cursor)} /></HeaderTitleProvider>;
 }
 function GuestCollectionRoute() { const { token } = guestCollectionRoute.useParams(); return <GuestCollectionPage token={token} />; }
 

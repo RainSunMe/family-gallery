@@ -12,7 +12,7 @@ import { InviteDialog, NewCollectionDialog, ShareDialog } from './components/Sha
 import { UploadSourceDialog } from './components/UploadSourceDialog';
 import { api, createAlbum, deleteAlbum, listAlbums, listCollections, restorePhotos, trashPhotos } from './lib/api';
 import { useT } from './lib/i18n';
-import { useQueue, useCompletedTick } from './lib/queue/store';
+import { useActiveQueueCount, useCompletedTick } from './lib/queue/store';
 import { start as startQueue, rebindSource } from './lib/queue/runner';
 import { canPickDirectory, DirectorySource, FileListSource, pickDirectory, pickFilesDialog } from './lib/queue/source';
 import type { Album, Collection, Role } from './lib/api';
@@ -87,7 +87,13 @@ export function FamilyApp() {
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearch(true); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
   // Every hook below must stay above the early returns: a hook after them would
   // run on some renders and not others.
-  const queueRecords = useQueue();
+  //
+  // The shell badge subscribes to the *number of files still active*, not to the
+  // records themselves, and the refresh rides a counter that publishes at most
+  // once a second. Subscribing to the whole queue here meant every part of every
+  // file re-rendered this component — and with it the page inside — which threw
+  // away the photo grid and made the browser reload every thumbnail.
+  const activeQueue = useActiveQueueCount();
   const completedTick = useCompletedTick();
   // Finished rows are removed from the queue, so the refresh is driven by a
   // counter rather than by counting rows that no longer exist.
@@ -119,7 +125,6 @@ export function FamilyApp() {
   if (role === 'loading') return <main className="min-h-dvh grid place-items-center"><LoaderCircle className="w-7 h-7 animate-spin text-accent" /></main>;
   if (!role) return <LoginPage onLogin={value => { setRole(value); client.clear(); }} />;
   const initialAlbum = path.startsWith('/albums/') ? path.split('/').pop() || albums[0]?.id || '' : albums[0]?.id || '';
-  const activeQueue = queueRecords.filter(record => record.status !== 'skipped' && record.status !== 'failed').length;
   return <HeaderTitleProvider><Shell role={role} albumCount={albums.length} queueCount={activeQueue} onUpload={() => setUpload(true)} onNewAlbum={() => setNewAlbum(true)} onNewCollection={() => setNewCollection(true)} onSettings={() => setSettings(true)}>
     <FamilyActionsContext.Provider value={{ role, onUpload: () => setUpload(true), onNewAlbum: () => setNewAlbum(true), onNewCollection: () => setNewCollection(true), onShare: setShareAlbum, onTrash: requestTrash, onDeleteAlbum: deleteWholeAlbum, onReattach: reattach, onToast: notify }}>
       <Outlet />

@@ -104,12 +104,26 @@ export async function createSession(input: CreateSessionInput): Promise<UploadGr
 }
 
 /**
+ * Parts of one file go up at once, up to this many.
+ *
+ * Serially was the reason a single 2 GiB video crawled: the line sat idle while
+ * each part was signed and RTT-bound before the next chunk was even sliced. Three
+ * in flight per file saturates a normal connection while staying inside the
+ * browser's six-connections-per-host cap, which several files share.
+ */
+const PART_CONCURRENCY = 3;
+
+/**
  * Upload the original, part by part.
  *
  * `skip` lets a resume avoid re-sending parts the bucket already holds, and
  * `onPart` fires after each successful PUT so the caller can persist progress
  * before the next part starts. That is the difference between losing one 8 MiB
  * chunk and losing the whole batch.
+ *
+ * Parts run in parallel but `onPart` is still called in the order they finish —
+ * the caller appends, and appending in completion order is harmless because a
+ * part list is a set keyed by number.
  */
 export async function sendOriginal(
   file: File,
@@ -126,20 +140,32 @@ export async function sendOriginal(
   const partSize = grant.part_size || 8 * 1024 * 1024;
   const count = Math.ceil(file.size / partSize);
   const skip = new Set(options.skip || []);
+  const pending: number[] = [];
+  for (let index = 0; index < count; index++) if (!skip.has(index + 1)) pending.push(index + 1);
+
   const parts: TransferredPart[] = [];
-  for (let index = 0; index < count; index++) {
-    const number = index + 1;
-    if (skip.has(number)) continue;
-    const start = index * partSize;
-    const chunk = file.slice(start, Math.min(file.size, start + partSize));
-    const signed = await api<{ url: string }>(`${guestPrefix(grant)}/uploads/${grant.id}/parts/sign`, { method: 'POST', body: JSON.stringify({ part_number: number }) });
-    const etag = await put(signed.url, chunk);
-    const part: TransferredPart = { n: number, etag, size: chunk.size };
-    parts.push(part);
-    options.onPart?.(part);
-    options.onProgress?.(index + 1, count, t('upload.partProgress', { index: index + 1, count }));
-  }
-  return parts;
+  let finished = count - pending.length;
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const number = pending[cursor++];
+      const index = number - 1;
+      const start = index * partSize;
+      const chunk = file.slice(start, Math.min(file.size, start + partSize));
+      const signed = await api<{ url: string }>(`${guestPrefix(grant)}/uploads/${grant.id}/parts/sign`, { method: 'POST', body: JSON.stringify({ part_number: number }) });
+      const etag = await put(signed.url, chunk);
+      const part: TransferredPart = { n: number, etag, size: chunk.size };
+      parts.push(part);
+      finished += 1;
+      options.onPart?.(part);
+      options.onProgress?.(finished, count, t('upload.partProgress', { index: finished, count }));
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(PART_CONCURRENCY, pending.length) }, worker));
+  // Sorted so the returned list is stable regardless of which PUT finished first.
+  return parts.sort((a, b) => a.n - b.n);
 }
 
 /** Upload the thumbnail and the preview. */

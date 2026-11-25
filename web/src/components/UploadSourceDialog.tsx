@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { FileImage, Film, FolderOpen, ImagePlus, LoaderCircle, UploadCloud } from 'lucide-react';
+import { FileImage, Film, FolderOpen, ImagePlus, UploadCloud } from 'lucide-react';
 import { Dialog, Note, Select } from './ui';
 import { formatSize } from '../lib/api';
 import type { Album } from '../lib/api';
@@ -157,7 +157,7 @@ export function UploadSourceDialog({ albums, initialAlbum, onClose, onQueued }: 
         <div className="mt-4 grid grid-cols-2 gap-2">
           {/* Chromium can remember a folder; elsewhere a folder still selects in one gesture. */}
           <button type="button" className="btn btn-secondary flex-col" style={{ minHeight: 92 }} onClick={canPickDirectory() ? chooseFolder : () => folderInput.current?.click()} disabled={busy}>
-            {busy ? <LoaderCircle className="icon animate-spin" /> : <FolderOpen className="icon" />}
+            <FolderOpen className="icon" />
             {busy ? t('queue.listing') : t('queue.pickFolder')}
           </button>
           <label
@@ -224,7 +224,7 @@ export function UploadSourceDialog({ albums, initialAlbum, onClose, onQueued }: 
       <div className="dialog-actions">
         <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('uploadDialog.close')}</button>
         <button className="btn btn-primary" disabled={!chosen.length || !albumID || !source || busy || !!error}>
-          {busy ? <LoaderCircle className="icon animate-spin" /> : <UploadCloud className="icon" />}
+          <UploadCloud className="icon" />
           {chosen.length ? `${t('queue.enqueue')} · ${chosen.length}` : t('queue.enqueue')}
         </button>
       </div>

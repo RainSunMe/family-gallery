@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, ArrowUpRight, CalendarRange, FolderPlus, Heart, Image, Images, Link2, LoaderCircle, Package, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, ArrowUpRight, CalendarRange, ChevronDown, FolderPlus, Heart, Image, Images, Link2, LoaderCircle, Package, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Album, DownloadJob, Photo } from '../lib/api';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Album, DownloadJob, Photo, PhotoPage } from '../lib/api';
 import { createDownload, getAlbum, getDownload, listAlbums, listPhotos, setAlbumCover, signDownload, updateAlbum } from '../lib/api';
 import { Dialog, Empty, Loading, Note } from './ui';
 import { useLocale, useT } from '../lib/i18n';
@@ -90,7 +90,7 @@ export function AlbumCard({ album }: { album: Album }) {
 
 export function PhotosPage({ albumID, onUpload, onShare, guestToken = '', guestAlbum, guestPhotos, canSetCover = false, canEditAlbum = false, canTrash = false, onTrash, onDeleteAlbum, onToast }: {
   albumID?: string; onUpload?: () => void; onShare?: () => void; guestToken?: string;
-  guestAlbum?: () => Promise<Album>; guestPhotos?: () => Promise<{ items: Photo[]; urls: Record<string, string>; next_cursor: string }>;
+  guestAlbum?: () => Promise<Album>; guestPhotos?: (cursor: string) => Promise<PhotoPage>;
   canSetCover?: boolean; canEditAlbum?: boolean; canTrash?: boolean; onTrash?: (ids: string[]) => void;
   onDeleteAlbum?: () => void; onToast?: (message: string) => void;
 }) {
@@ -102,14 +102,41 @@ export function PhotosPage({ albumID, onUpload, onShare, guestToken = '', guestA
   useHeaderShare(albumID && !guestToken && onShare ? albumID : '');
   const { data: album } = useQuery({ queryKey: ['album', albumID, guestToken], queryFn: () => guestAlbum ? guestAlbum() : getAlbum(albumID!), enabled: !!albumID });
   const titleRef = usePageTitleScroll(album?.name || t('photos.title'));
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['photos', albumID || 'all', guestToken], queryFn: () => guestPhotos ? guestPhotos() : listPhotos(albumID) });
+  // One page is 60 photos. A resumable upload of a camera roll easily produces
+  // hundreds, and the grid used to render only the first page — the album's
+  // header count came from `photo_count`, so the two disagreed with no way to
+  // see the rest. Pages are now accumulated as the sentinel below scrolls in.
+  const { data, isLoading, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['photos', albumID || 'all', guestToken],
+    queryFn: ({ pageParam }) => guestPhotos ? guestPhotos(pageParam) : listPhotos(albumID, 'all', pageParam),
+    initialPageParam: '',
+    getNextPageParam: last => last.next_cursor || undefined,
+  });
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [viewer, setViewer] = useState<number | null>(null);
   const [download, setDownload] = useState(false);
   const [editing, setEditing] = useState(false);
-  const photos = data?.items || [];
+  const pages = data?.pages ?? [];
+  const photos = useMemo(() => {
+    // A photo can appear on two pages when an upload finishes between their
+    // requests; keyset cursors make that rare but not impossible.
+    const seen = new Set<string>();
+    return pages.flatMap(page => page.items).filter(photo => (seen.has(photo.id) ? false : (seen.add(photo.id), true)));
+  }, [pages]);
+  const urls = useMemo(() => pages.reduce<Record<string, string>>((all, page) => Object.assign(all, page.urls), {}), [pages]);
   useEffect(() => { setSelected(new Set()); setSelecting(false); }, [albumID]);
+  // The sentinel sits under the grid and asks for the next page before the user
+  // reaches the bottom. The button next to it is the fallback (and keeps the
+  // grid usable where IntersectionObserver is unavailable).
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = moreRef.current;
+    if (!node || !hasNextPage || isFetchingNextPage) return;
+    const observer = new IntersectionObserver(entries => { if (entries[0]?.isIntersecting) void fetchNextPage(); }, { rootMargin: '800px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
   useEffect(() => {
     if (!selecting) return;
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setSelecting(false); setSelected(new Set()); } };
@@ -142,7 +169,7 @@ export function PhotosPage({ albumID, onUpload, onShare, guestToken = '', guestA
   return <div className="page">
     <div className="flex items-start sm:items-center justify-between gap-5 mb-7"><div className="min-w-0" ref={titleRef}><h1 className="page-title">{album?.name || t('photos.title')}<span className="text-accent">.</span></h1><p className="page-description">{album?.description || t('photos.description')}</p></div></div>
     {album && <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted mb-6 -mt-3"><span className="inline-flex items-center gap-1.5"><Image className="w-3.5 h-3.5" />{t('photos.count', { count: album.photo_count })}</span>{takenRange && <span className="inline-flex items-center gap-1.5" title={t('photos.takenRange', { range: takenRange })}><CalendarRange className="w-3.5 h-3.5" />{takenRange}</span>}<span className="inline-flex items-center gap-1.5"><Link2 className="w-3.5 h-3.5" />{guestToken ? t('photos.guest') : album.shared ? t('albums.shared') : t('albums.private')}</span></div>}
-    {isLoading ? <Loading rows={2} /> : error ? <Empty icon={<Image className="w-8 h-8" />} title={t('photos.loadError')} description={error.message} action={<button className="btn btn-secondary" onClick={() => refetch()}>{t('common.retry')}</button>} /> : photos.length ? <PhotoGrid photos={photos} urls={data?.urls || {}} selecting={selecting} selected={selected} onSelect={select} onStartSelection={startSelection} onOpen={setViewer} onSetCover={canSetCover && albumID ? setCover : undefined} onTrash={canTrash ? photo => onTrash?.([photo.id]) : undefined} /> : <Empty icon={<Image className="w-8 h-8" />} title={t('photos.emptyTitle')} description={albumID ? t('photos.emptyAlbum') : t('photos.emptyAll')} action={onUpload && <button className="btn btn-secondary" onClick={onUpload}><ArrowUpFromLine className="icon" />{t('photos.chooseUpload')}</button>} />}
+    {isLoading ? <Loading rows={2} /> : error ? <Empty icon={<Image className="w-8 h-8" />} title={t('photos.loadError')} description={error.message} action={<button className="btn btn-secondary" onClick={() => refetch()}>{t('common.retry')}</button>} /> : photos.length ? <><PhotoGrid photos={photos} urls={urls} selecting={selecting} selected={selected} onSelect={select} onStartSelection={startSelection} onOpen={setViewer} onSetCover={canSetCover && albumID ? setCover : undefined} onTrash={canTrash ? photo => onTrash?.([photo.id]) : undefined} />{hasNextPage && <div ref={moreRef} className="flex justify-center mt-8"><button className="btn btn-secondary" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage}>{isFetchingNextPage ? <LoaderCircle className="icon animate-spin" /> : <ChevronDown className="icon" />}{isFetchingNextPage ? t('photos.loadingMore') : t('photos.loadMore')}</button></div>}</> : <Empty icon={<Image className="w-8 h-8" />} title={t('photos.emptyTitle')} description={albumID ? t('photos.emptyAlbum') : t('photos.emptyAll')} action={onUpload && <button className="btn btn-secondary" onClick={onUpload}><ArrowUpFromLine className="icon" />{t('photos.chooseUpload')}</button>} />}
     {selecting && <div className="selection-bar glass"><span className="text-xs font-medium">{selected.size ? t('photos.selected', { count: selected.size }) : t('photos.select')}</span><button className="text-xs text-accent" onClick={() => setSelected(selected.size === photos.length ? new Set() : new Set(photos.map(photo => photo.id)))}>{selected.size === photos.length ? t('photos.deselectAll') : t('photos.selectAll')}</button><button className="btn btn-primary" disabled={!selected.size} onClick={() => setDownload(true)}><ArrowDownToLine className="icon" />{t('photos.download')}</button>{canTrash && <button className="btn btn-secondary text-[#a25142]" disabled={!selected.size} onClick={() => { onTrash?.([...selected]); finishSelection(); }}><Trash2 className="icon" />{t('photos.trash')}</button>}<button className="icon-btn" onClick={finishSelection} aria-label={t('photos.cancelSelection')}><X className="icon" /></button></div>}
     {viewer !== null && <PhotoViewer photos={photos} initialIndex={viewer} onClose={() => setViewer(null)} guestToken={guestToken} />}
     {download && targetAlbum && <DownloadDialog albumID={targetAlbum} photoIDs={[...selected]} guestToken={guestToken} onClose={() => setDownload(false)} />}
